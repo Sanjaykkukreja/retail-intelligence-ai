@@ -92,11 +92,17 @@ def test_claude_adapter_wire_format_caching_and_cost():
     t1 = conv.step(tools)
     # prompt caching: system prompt and the LAST tool carry the cache marker
     assert sent[0]["system"] == [{"type": "text", "text": "SYS", "cache_control": {"type": "ephemeral"}}]
+    # the growing conversation is cached too: marker on the LAST block of a request copy, never on the stored history
+    assert sent[0]["messages"][-1] == {"role": "user", "content": [
+        {"type": "text", "text": "What is out of stock?", "cache_control": {"type": "ephemeral"}}]}
     assert "cache_control" not in sent[0]["tools"][0] and sent[0]["tools"][-1]["cache_control"] == {"type": "ephemeral"}
     assert t1.usage.cache_write_tokens == 1000 and t1.usage.cost_usd == 0.0028        # (90x2 + 1000x2x1.25 + 12x10) / 1e6
     conv.add_tool_results([(t1.tool_calls[0], "[]")])
     t2 = conv.step([])
-    assert sent[1]["messages"][-1] == {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "[]"}]}
+    assert sent[1]["messages"][-1] == {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "[]", "cache_control": {"type": "ephemeral"}}]}
+    assert conv.messages[0]["content"] == "What is out of stock?"              # stored history unchanged
+    assert json.dumps(sent[1], default=str).count("cache_control") <= 4         # API limit
     assert t2.text == "Two SKUs are out of stock."                                     # thinking block ignored in text
     assert t2.usage.cache_read_tokens == 1000 and t2.usage.cost_usd == 0.0007         # cache read at 0.05x for Sonnet 5.5
     assert t2.usage.total_input_tokens == 1200
@@ -176,6 +182,28 @@ def test_why_question_sees_the_whole_event_and_its_rupee_finding(adb):
     found = next(e for e in r.evidence if e["tool"] == "list_findings")["result"]["rows"]
     delay = [f for f in found if f["type"] == "dispatch_delay"]
     assert delay and delay[0]["est_impact_inr"] > 0
+
+
+def test_follow_up_without_a_date_keeps_the_previous_period(adb):
+    """Live run 27 Nov: 'How long were orders waiting on those days?' fell back to the last 28 days."""
+    agent = Agent(adb, ScriptedModel(lambda c, t: say("See [S1].")))
+    first = agent.ask("Why did cancellations jump in mid-September?")
+    follow = agent.ask("How long were orders waiting for dispatch on those days?", session_id=first.session_id)
+    speed = next(e for e in follow.evidence if e["tool"] == "fulfilment_speed")
+    assert speed["args"]["start"] <= "2026-09-10" and speed["args"]["end"] <= "2026-09-30"
+    found = next(e for e in follow.evidence if e["tool"] == "list_findings")["result"]["rows"]
+    assert any(f["type"] == "dispatch_delay" for f in found)
+    new_topic = agent.ask("How fast are we dispatching orders?", session_id=first.session_id)   # no back-reference
+    assert next(e for e in new_topic.evidence if e["tool"] == "fulfilment_speed")["args"]["start"] > "2026-10-01"
+    fresh = agent.ask("How long were orders waiting for dispatch on those days?")       # new chat: no period to inherit
+    speed2 = next(e for e in fresh.evidence if e["tool"] == "fulfilment_speed")
+    assert speed2["args"]["start"] > "2026-10-01"
+
+
+def test_dates_in_words_are_not_treated_as_figures():
+    from retail_intel.agent.grounding import unsupported_numbers
+    text = "From 27 Oct to 22 Nov, and between 14 to 20 Sep 2026 (Sep 14), waits were 84.2 hours; 999 orders"
+    assert unsupported_numbers(text, ['{"avg": 84.2}']) == ["999"]
 
 
 def test_sequential_expiry_then_markdown(adb):

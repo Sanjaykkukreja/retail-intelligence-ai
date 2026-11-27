@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import re
 
-_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+_MON = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*"
+# Dates are not figures: 2026-10-27, 27/10/2026, "27 Oct", "14 to 20 Sep 2026", "Sep 14". (Live run 27 Nov flagged "27 Oct".)
+_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
+                   r"|\b\d{1,2}(?:\s*(?:-|\u2013|to|and)\s*\d{1,2})?\s+" + _MON + r"\b(?:\s+\d{4})?"
+                   r"|\b" + _MON + r"\s+\d{1,2}\b(?:,?\s+\d{4})?", re.I)
 _NUM = re.compile(r"(?<![\w.#])(\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(%|crores?|cr\b|lakhs?|l\b|k\b)?", re.I)
 _SCALE = {"cr": 1e7, "crore": 1e7, "crores": 1e7, "l": 1e5, "lakh": 1e5, "lakhs": 1e5, "k": 1e3}
 

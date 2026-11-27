@@ -4,6 +4,7 @@ Each build session adds one row. Like Pattern Lab's manifest: what changed, test
 
 | Date | Change | Tests | Open after this |
 |---|---|---|---|
+| 2026-11-27 | From the live memory check: follow-ups that point back ("those days") keep the earlier period; dates written in words ("27 Oct") no longer trip the figure check; the growing conversation is now prompt-cached, not just the instructions. First live cost: 31,201 tokens, about $0.08, 19.6 s for a 2-tool-call follow-up | 45 passed | Re-measure cost after caching; password gate; rotate API key |
 | 2026-11-27 | Live on Streamlit Community Cloud with Claude. Fix from first live answer: "why" questions now see 3 days before and 7 after the event, and get findings for that period (with their rupee impact); `.gitignore` blocks secrets files | 43 passed | Memory follow-up check; token cost per question; password gate; rotate API key |
 | 2026-11-25 | All AI moved to Claude: Sonnet 5.5 answers, Haiku 5.5 routes; prompt caching on system prompt and tools; cost per call incl. cache reads/writes; OpenAI adapter now optional; docs and guide updated | 42 passed | Live Claude API run |
 | 2026-11-25 | Cloud-ready: app builds demo data on first start; reads AI key from Streamlit Secrets. Build guide written. | 40 passed | Live API run; screen layout check in browser |

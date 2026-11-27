@@ -95,6 +95,7 @@ class Window:
     end: str
     day: str | None
     label: str
+    explicit: bool = True          # False = no date in the question; a follow-up may inherit the previous period
 
 
 def _iso(d: date) -> str:
@@ -160,7 +161,7 @@ def parse_dates(q: str, as_of: str, default_days: int = 28) -> Window:
         y = year_for(mon, m.group(2))
         s, e = date(y, mon, 1), date(y, mon, calendar.monthrange(y, mon)[1])
         return Window(_iso(s), _iso(cap(e)), None, f"{s:%B %Y}")
-    return Window(_iso(a - timedelta(days=default_days - 1)), as_of, None, f"last {default_days} days")
+    return Window(_iso(a - timedelta(days=default_days - 1)), as_of, None, f"last {default_days} days", False)
 
 
 # ----------------------------------------------------------------------------- product mentions

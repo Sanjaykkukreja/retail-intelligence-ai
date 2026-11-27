@@ -27,6 +27,9 @@ from .models import ModelClient, Usage, cost_usd
 from .prompts import REPAIR, SYSTEM
 from .tools import Toolbox, is_empty
 
+# A follow-up that points back ("on those days", "that week", "during it") keeps the previous question's period.
+# A follow-up on a new topic with no date gets the default window instead.
+BACK_REFERENCE = re.compile(r"\b(those|these|that|then|same|during it|that period|this period)\b", re.I)
 EVIDENCE_CHARS_PER_SOURCE = 6000
 TOOL_RESULT_CHARS = 8000
 
@@ -54,6 +57,7 @@ class AgentResult:
     latency_s: float = 0.0
     session_id: str = ""
     run_id: str = ""
+    window: dict | None = None
 
     @property
     def tools_used(self) -> list[str]:
@@ -84,8 +88,14 @@ class Agent:
             hist = memory.history(conn, session_id)
             cls = router.classify(question, self.router_model)
             ctx = router.make_ctx(conn, question, _as_of(conn))
+            if not ctx.win.explicit and hist and BACK_REFERENCE.search(question):   # "those days", "that week", "then"
+                prev = self._last_window(conn, session_id)
+                if prev:
+                    ctx.win = router.Window(prev[0], prev[1], prev[2], "same period as the previous question", True)
             plan = router.PLANS[cls.intent]
             res = AgentResult("", cls.intent, cls.method, plan.pattern, usage=Usage().add(cls.usage), session_id=session_id)
+            if ctx.win.explicit:
+                res.window = dict(start=ctx.win.start, end=ctx.win.end, day=ctx.win.day)
 
             if plan.fast_path and self._fast_path_applies(plan, question):
                 res.answer, res.pattern = self._fast_path(conn, plan.fast_path, res), "fast_path"
@@ -199,6 +209,15 @@ class Agent:
 
     # ------------------------------------------------------------------------------------------------ helpers
     @staticmethod
+    def _last_window(conn, session_id: str):
+        try:
+            return conn.execute("""select win_start, win_end, win_day from agent_runs
+                                   where session_id = ? and win_start is not null order by rowid desc limit 1""",
+                                (session_id,)).fetchone()
+        except Exception:                                           # no runs table yet
+            return None
+
+    @staticmethod
     def _add_evidence(res: AgentResult, tr) -> str:
         sid = f"S{len(res.evidence) + 1}"
         res.evidence.append(dict(source=sid, tool=tr.name, args=tr.args, ok=tr.ok, cached=tr.cached, ms=tr.ms, result=tr.result))
@@ -222,19 +241,22 @@ class Agent:
         conn.execute("""create table if not exists agent_runs (run_id text, session_id text, ts text, question text, intent text,
                         method text, pattern text, tools text, model text, input_tokens integer, output_tokens integer,
                         model_calls integer, cost_usd real, grounded integer, unsupported text, stopped text, latency_s real)""")
-        for col in ("cache_read_tokens", "cache_write_tokens"):          # added when caching arrived; old tables get it
+        for col, kind in (("cache_read_tokens", "integer"), ("cache_write_tokens", "integer"),
+                          ("win_start", "text"), ("win_end", "text"), ("win_day", "text")):   # columns added later
             try:
-                conn.execute(f"alter table agent_runs add column {col} integer")
+                conn.execute(f"alter table agent_runs add column {col} {kind}")
             except Exception:
                 pass
+        w = res.window or {}
         conn.execute("""insert into agent_runs (run_id, session_id, ts, question, intent, method, pattern, tools, model,
                         input_tokens, output_tokens, model_calls, cost_usd, grounded, unsupported, stopped, latency_s,
-                        cache_read_tokens, cache_write_tokens) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        cache_read_tokens, cache_write_tokens, win_start, win_end, win_day)
+                        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                      (res.run_id, res.session_id, datetime.now().isoformat(timespec="seconds"), question, res.intent, res.method,
                       res.pattern, json.dumps(res.tools_used), getattr(self.model, "model", "none"), res.usage.total_input_tokens,
                       res.usage.output_tokens, res.usage.calls, res.cost_usd, None if res.grounded is None else int(res.grounded),
                       json.dumps(res.unsupported), res.stopped, res.latency_s, res.usage.cache_read_tokens,
-                      res.usage.cache_write_tokens))
+                      res.usage.cache_write_tokens, w.get("start"), w.get("end"), w.get("day")))
         conn.commit()
         memory.append(conn, res.session_id, "user", question)
         memory.append(conn, res.session_id, "assistant", res.answer)

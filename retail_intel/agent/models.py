@@ -166,13 +166,30 @@ class _AnthropicConversation(Conversation):
         if self.o.cache:
             system_block["cache_control"] = {"type": "ephemeral"}
         kwargs = dict(model=self.o.model, max_tokens=self.o.max_output_tokens, system=[system_block],
-                      messages=list(self.messages))
+                      messages=self._messages_for_request())
         if tools:
             spec = [dict(name=t["name"], description=t["description"], input_schema=t["input_schema"]) for t in tools]
             if self.o.cache:
                 spec[-1]["cache_control"] = {"type": "ephemeral"}   # caches every tool up to and including this one
             kwargs["tools"] = spec
         return kwargs
+
+    def _messages_for_request(self) -> list:
+        """Mark the end of the conversation so far as cacheable. Each agent step re-sends the whole conversation;
+        with this marker the next step reads it from cache (0.05x on Sonnet) instead of paying full price again.
+        The marker goes on a copy, so the stored conversation never collects more than the 4 allowed markers."""
+        msgs = list(self.messages)
+        if not (self.o.cache and msgs):
+            return msgs
+        last = dict(msgs[-1])
+        content = last["content"]
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else \
+            [dict(b) if isinstance(b, dict) else b for b in content]
+        if blocks and isinstance(blocks[-1], dict):
+            blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+        last["content"] = blocks
+        msgs[-1] = last
+        return msgs
 
     def step(self, tools):
         kwargs = self._request(tools)
