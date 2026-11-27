@@ -167,6 +167,17 @@ def test_concurrent_diagnosis_then_grounded_answer(adb):
     assert r.usage.calls == 1 and r.grounded is True and r.unsupported == []
 
 
+def test_why_question_sees_the_whole_event_and_its_rupee_finding(adb):
+    """Live run 27 Nov: the analyst missed the dispatch-delay finding and said the delay 'had not eased' because
+    its window stopped on the last day of the event. Both fixed: padded window + findings filtered by period."""
+    r = Agent(adb, ScriptedModel(lambda c, t: say("See [S1]."))).ask("Why did cancellations jump in mid-September?")
+    speed = next(e for e in r.evidence if e["tool"] == "fulfilment_speed")
+    assert speed["args"]["start"] <= "2026-09-10" and speed["args"]["end"] >= "2026-09-27"
+    found = next(e for e in r.evidence if e["tool"] == "list_findings")["result"]["rows"]
+    delay = [f for f in found if f["type"] == "dispatch_delay"]
+    assert delay and delay[0]["est_impact_inr"] > 0
+
+
 def test_sequential_expiry_then_markdown(adb):
     r = Agent(adb, ScriptedModel(lambda c, t: say("See [S2]."))).ask("Which batches are close to expiry?")
     assert r.tools_used[:2] == ["expiry_exposure", "markdown_scenarios"] and r.pattern == "sequential"

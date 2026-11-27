@@ -210,13 +210,15 @@ class Toolbox:
                  {"start": D, "end": D}, ["start", "end"], lambda conn, start, end: ff.daily_fulfilment(conn, start, end)),
             spec("return_reasons", "Returns by category and reason (shade mismatch, skin reaction, damaged ...).",
                  {"start": D, "end": D}, ["start", "end"], lambda conn, start, end: sales.returns_by_category(conn, start, end)),
-            spec("list_findings", "Stored findings (what happened, rupee impact, suggested action), most severe first.",
-                 {"current_only": {"type": "boolean"}, "limit": {"type": "integer"}}, [],
-                 lambda conn, current_only=True, limit=10: db.read(
-                     conn, "select id, type, severity, title, start, end, est_impact_inr, action, calc from findings "
-                           + ("where is_current = 1 " if current_only else "")
+            spec("list_findings", "Stored findings (what happened, rupee impact, suggested action), most severe first. "
+                 "Give start/end to get findings that overlap a period, including past ones.",
+                 {"current_only": {"type": "boolean"}, "limit": {"type": "integer"}, "start": D, "end": D}, [],
+                 lambda conn, current_only=True, limit=10, start=None, end=None: db.read(
+                     conn, "select id, type, severity, title, start, \"end\", est_impact_inr, action, calc from findings where 1=1 "
+                           + ("and is_current = 1 " if current_only else "")
+                           + ("and start <= ? and coalesce(\"end\", start) >= ? " if start and end else "")
                            + "order by case severity when 'high' then 0 when 'medium' then 1 else 2 end, est_impact_inr desc limit ?",
-                     (limit,))),
+                     ((end, start) if start and end else ()) + (limit,))),
             spec("data_quality", "Latest data-quality checks across the three source systems.", {}, [],
                  lambda conn: db.read(conn, "select check_name, severity, issue_count, detail from dq_issue")),
             spec("open_questions", "Questions waiting for the owner's answer.", {}, [],

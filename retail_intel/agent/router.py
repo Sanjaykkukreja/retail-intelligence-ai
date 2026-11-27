@@ -211,6 +211,17 @@ def _w(c: Ctx) -> dict:
     return dict(start=c.win.start, end=c.win.end)
 
 
+def _wpad(c: Ctx, before: int = 3, after: int = 7) -> dict:
+    """For "why" questions: a few days either side, so the analyst sees the build-up and the recovery."""
+    s, e = date.fromisoformat(c.win.start), date.fromisoformat(c.win.end)
+    return dict(start=_iso(s - timedelta(days=before)), end=_iso(min(e + timedelta(days=after), date.fromisoformat(c.as_of))))
+
+
+def _findings_in(c: Ctx, limit: int = 12) -> dict:
+    """Findings that overlap the question's period, past or current (impact estimates live here)."""
+    return dict(current_only=False, limit=limit, start=c.win.start, end=c.win.end)
+
+
 def _prior(c: Ctx) -> dict:
     s, e = date.fromisoformat(c.win.start), date.fromisoformat(c.win.end)
     n = (e - s).days + 1
@@ -219,9 +230,9 @@ def _prior(c: Ctx) -> dict:
 
 def _diagnose_gather(c: Ctx) -> list:
     g = [("compare_day", dict(day=c.win.day))] if c.win.day else []
-    return g + [("get_sales_summary", _w(c)), ("get_sales_summary", _prior(c)), ("website_funnel", _w(c)),
-                ("fulfilment_speed", _w(c)), ("stockout_events", {}), ("discount_leakage", _w(c)),
-                ("list_findings", dict(current_only=False, limit=12))]
+    return g + [("get_sales_summary", _w(c)), ("get_sales_summary", _prior(c)), ("website_funnel", _wpad(c)),
+                ("fulfilment_speed", _wpad(c)), ("stockout_events", {}), ("discount_leakage", _w(c)),
+                ("list_findings", _findings_in(c))]
 
 
 def _expiry_followup(c: Ctx, evidence: list) -> list:
@@ -251,7 +262,8 @@ PLANS: dict[str, Plan] = {
                     gather=lambda c: [("discount_leakage", _w(c) if "diwali" not in c.q.lower()
                                        else dict(start=f"{c.as_of[:4]}-10-15", end=c.as_of))]),
     "operations": Plan("concurrent", ["fulfilment_speed", "list_findings", "data_quality"],
-                       gather=lambda c: [("fulfilment_speed", _w(c)), ("list_findings", dict(limit=10)), ("data_quality", {})]),
+                       gather=lambda c: [("fulfilment_speed", _wpad(c)), ("list_findings", _findings_in(c, 10)),
+                                         ("data_quality", {})]),
     "web": Plan("conditional", ["website_funnel", "get_sales_summary", "list_findings"], gather=lambda c: [("website_funnel", _w(c))]),
     "returns": Plan("conditional", ["return_reasons", "top_skus"], gather=lambda c: [("return_reasons", _w(c))]),
     "general": Plan("conditional", READ_TOOLS),
