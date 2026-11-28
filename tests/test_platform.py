@@ -238,3 +238,93 @@ def test_stuck_order_question_gets_the_profile_from_any_agent(pdb):
     assert "order_to_cash_gaps" in r.tools_used
     r2 = Agent(pdb, None).ask("How is dispatch speed this month?")             # unrelated operations question: not fetched
     assert "order_to_cash_gaps" not in r2.tools_used
+
+
+# ------------------------------------------------------------------ question families
+def test_order_list_matches_the_planted_truth(pdb, world):
+    from retail_intel import db
+    from retail_intel.metrics.orders import order_list
+    conn = db.connect(pdb)
+    t = world["truth"]
+    assert order_list(conn, "cancelled")["orders"] == t["counts"]["cancelled_orders"]
+    assert order_list(conn, "not_dispatched", min_age_days=4)["orders"] == t["counts"]["stuck_orders_old"]
+    rto_unbilled = conn.execute("select count(*) from order_xref where dispatched_not_billed=1 and wms_status='RTO'").fetchone()[0]
+    assert order_list(conn, "rto")["orders"] + rto_unbilled == t["counts"]["rto_orders"]   # billing sees all but the manual ones
+    d0, d1 = t["planted"]["dispatch_delay"]["start"], t["planted"]["dispatch_delay"]["end"]
+    during = order_list(conn, "delayed", start=d0, end=d1)["orders"]
+    week_before = order_list(conn, "delayed", start="2026-09-07", end="2026-09-13")["orders"]
+    assert during > 10 * max(week_before, 1)
+    g = order_list(conn, "cancelled", group_by="payment_mode")
+    assert int(g["groups"]["orders"].sum()) == g["orders"]
+    with pytest.raises(ValueError):
+        order_list(conn, "lost")
+    conn.close()
+
+
+def test_sell_through_adds_up(pdb):
+    from retail_intel import db
+    from retail_intel.metrics.orders import sell_through
+    conn = db.connect(pdb)
+    st = sell_through(conn, "2026-08-26", "2026-11-23")
+    assert st["sell_through_pct"].between(0, 100).all() and (st["gmroi_annual"] > 0).all()
+    sold = conn.execute("""select sum(qty) from fact_order_line where recognized = 1
+                           and order_date between '2026-08-26' and '2026-11-23'""").fetchone()[0]
+    assert st["units_sold"].sum() == pytest.approx(sold)
+    conn.close()
+
+
+def test_question_library_is_valid_and_classifies():
+    from retail_intel.platform.questions import classify, load_families, validate_families
+    fams = load_families()
+    assert validate_families(fams) == []
+    assert classify(["fulfilment_speed", "order_to_cash_gaps", "list_findings"], fams,
+                    question="Are any paid orders stuck?")[0][0] == "order_to_cash"
+    assert classify(["get_sales_summary", "stockout_events"], fams, intent="diagnose")[0][0] == "what_changed_why"
+    assert classify(["run_readonly_sql"], fams) == ([], True)
+
+
+def test_certified_example_questions_reach_their_family(pdb):
+    """Each certified family's example questions, asked to the general analyst with NO model, must fetch that family's
+    tools. Catches a family that exists on paper but that routing never reaches (it found 3 routing bugs on day one)."""
+    from retail_intel.platform.questions import classify, load_families
+    fams = load_families()
+    misses = []
+    for fid, f in fams.items():
+        if f["status"] != "certified" or fid in ("owner_instructions", "decisions_and_outcomes"):
+            continue
+        for q in f["examples"][:2]:
+            r = Agent(pdb, None).ask(q)
+            got, _ = classify(r.tools_used, fams, None, r.intent)
+            if fid not in got:
+                misses.append(f"{fid}: '{q}' -> {got[:2]} via {r.intent}")
+    assert not misses, misses
+
+
+def test_definitions_register_and_rule_changes(pdb):
+    from retail_intel import db
+    from retail_intel.platform.definitions import change_rule, register, sign_off
+    from retail_intel.reconcile.order_matching import build_order_xref
+    conn = db.connect(pdb)
+    reg = register(conn).set_index("name")
+    assert reg.loc["Stuck order", "value"] == "4 days" and reg.loc["Stuck order", "signed_off"] == "not signed off"
+    sign_off(conn, "Stuck order", "Sanjay")
+    before = conn.execute("select sum(paid_not_dispatched) from order_xref").fetchone()[0]
+    change_rule(conn, "stuck_after_days", 30, "Sanjay")
+    build_order_xref(conn)
+    after = conn.execute("select sum(paid_not_dispatched) from order_xref").fetchone()[0]
+    assert after < before                                     # the owner's rule really drives the count
+    reg = register(conn).set_index("name")
+    assert reg.loc["Stuck order", "value"] == "30 days" and "changed since" in reg.loc["Stuck order", "signed_off"]
+    assert conn.execute("select new_value from rule_changes").fetchone()[0] == "30"
+    change_rule(conn, "stuck_after_days", 4, "Sanjay"); build_order_xref(conn)
+    with pytest.raises(ValueError):
+        sign_off(conn, "Stuck order", "  ")
+    conn.close()
+
+
+def test_exploratory_answers_are_labelled(pdb):
+    turns = iter([ModelTurn("", [ToolCall("c1", "top_skus", {"start": "2030-01-01", "end": "2030-01-02"})], Usage()),
+                  ModelTurn("", [ToolCall("c2", "run_readonly_sql", {"query": "select count(*) n from dim_product"})], Usage()),
+                  ModelTurn("There are 200 products [S2].", [], Usage())])
+    r = Agent(pdb, ScriptedModel(lambda conv, tools: next(turns))).ask("How many products do we sell in total?")
+    assert r.exploratory and "Exploratory answer" in r.answer

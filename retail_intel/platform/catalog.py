@@ -170,10 +170,14 @@ def owner_agent(finding_type: str, agents: list[AgentTemplate]) -> str | None:
 
 # ----------------------------------------------------------------------------------------------- arguments
 def fill_args(args: dict, values: dict) -> dict | None:
-    """Replace "$name" placeholders in tool arguments. Returns None if a needed value is missing."""
+    """Replace "$name" placeholders in tool arguments. Returns None if a needed value is missing.
+    "$?name" is optional: the argument is left out when the value is missing."""
     out = {}
     for k, v in (args or {}).items():
-        if isinstance(v, str) and v.startswith("$"):
+        if isinstance(v, str) and v.startswith("$?"):
+            if values.get(v[2:]) is not None:
+                out[k] = values[v[2:]]
+        elif isinstance(v, str) and v.startswith("$"):
             if values.get(v[1:]) is None:
                 return None
             out[k] = values[v[1:]]

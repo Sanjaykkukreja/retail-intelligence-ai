@@ -12,7 +12,7 @@ north_star = "leakage_shortfall_28d"
 guardrails = ["net_revenue_28d"]
 outcome = "Margin shortfall on the capped SKUs in the 28 days after approval, versus before"
 autonomy = 1
-tools = ["discount_leakage", "category_performance", "top_skus", "get_sales_summary", "compare_day", "return_reasons",
+tools = ["sell_through", "discount_leakage", "category_performance", "top_skus", "get_sales_summary", "compare_day", "return_reasons",
          "markdown_scenarios", "list_findings", "open_questions", "owner_answers", "record_answer",
          "list_recommendations", "decide_recommendation", "update_business_rule"]
 streams = ["products", "order_lines", "invoices", "refunds"]

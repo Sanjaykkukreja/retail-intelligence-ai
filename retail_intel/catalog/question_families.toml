@@ -1,0 +1,228 @@
+# The question library: what each role asks, grouped into FAMILIES.
+# A family is one tested tool (or a few) that answers many questions by changing its settings.
+#   "Orders delayed 2+ days", "cancelled orders last week", "COD orders not shipped" = one family (order_list).
+#
+# status:  certified  = answered by tested tools today
+#          build_next = data exists, tool not built yet (answered on the exploratory path meanwhile)
+#          needs_data = a data stream is missing; the family shows what to ask the client for
+#
+# match   words that identify the family in a question; gather = the check it always runs (any agent allowed it)
+# The "Questions asked" page uses this file to sort every logged question into a family, so we can see which
+# questions people really ask and which keep landing on the exploratory path (candidates to certify next).
+# Sources for the role questions: see docs/08_question_library.md.
+
+# ------------------------------------------------------------------ shared
+[families.order_list]
+role = "shared"
+label = "Orders by status, age, stock and payment"
+status = "certified"
+tools = ["order_list"]
+settings = ["status", "min_age_days", "max_age_days", "payment_mode", "stock_on_order_day", "group_by", "period"]
+examples = ["Which orders are delayed by more than 2 days?", "How many orders were cancelled last week?",
+            "Which orders did we take when the product was out of stock?", "Show COD orders not yet dispatched",
+            "Returned-to-origin orders this month by payment mode"]
+match = '''(delay|late|cancel|\brto\b|returned to origin|not (yet )?(dispatched|shipped)|backorder|pending)\w*.{0,40}\borders?\b|\borders?\b.{0,60}(delay|late\b|cancel|\brto\b|returned to origin|not (yet )?(dispatched|shipped)|out of stock|backorder|\bcod\b|pending)'''
+gather = [{ tool = "order_list", args = { status = "$order_status", start = "$start", end = "$end", delay_over_hours = "$?delay_hours", payment_mode = "$?payment_mode", group_by = "$?order_group" } }]
+
+# ------------------------------------------------------------------ leadership
+[families.business_pulse]
+role = "chief_of_staff"
+label = "How is the business doing"
+status = "certified"
+tools = ["get_briefing", "get_sales_summary", "compare_day"]
+settings = ["period", "day"]
+examples = ["How is the business doing?", "How was yesterday versus a normal day?", "Net sales this month"]
+match = '''how('?s| is| was| are) (the |my )?business|how are we doing|net sales|how was yesterday|normal day'''
+gather = [{ tool = "get_sales_summary", args = { start = "$start", end = "$end" } }]
+
+[families.what_changed_why]
+role = "chief_of_staff"
+label = "What changed and why"
+status = "certified"
+tools = ["compare_day", "list_findings"]
+settings = ["period"]
+examples = ["Why did sales drop in mid-October?", "What happened to sales on 14 September?"]
+
+[families.fulfilment]
+role = "chief_of_staff"
+label = "Dispatch speed, cancellations and RTO rates"
+status = "certified"
+tools = ["fulfilment_speed"]
+settings = ["period"]
+examples = ["How fast are we dispatching orders this month?", "Is the warehouse keeping the 48-hour promise?"]
+match = '''how fast.{0,30}dispatch|dispatch(ing)? (speed|time)|\b48.hour|\bsla\b|dispatch promise'''
+gather = [{ tool = "fulfilment_speed", args = { start = "$start", end = "$end" } }]
+
+[families.website_funnel]
+role = "chief_of_staff"
+label = "Website traffic, conversion and checkout"
+status = "certified"
+tools = ["website_funnel"]
+settings = ["period"]
+examples = ["How is website conversion trending?", "Is the checkout working properly?"]
+match = '''conversion|checkout|traffic|funnel|sessions|add.to.cart'''
+gather = [{ tool = "website_funnel", args = { start = "$start", end = "$end" } }]
+
+[families.owner_instructions]
+role = "shared"
+label = "Owner tells the system something (answers, rules, decisions)"
+status = "certified"
+tools = ["record_answer", "update_business_rule"]
+examples = ["The Niacinamide stockout was a supplier delay", "Our margin target is 35%"]
+
+[families.decisions_and_outcomes]
+role = "chief_of_staff"
+label = "Decisions waiting and what came of past ones"
+status = "certified"
+tools = ["list_recommendations", "decide_recommendation"]
+settings = ["status"]
+examples = ["What is waiting for my approval?", "Did the reorder we approved fix the stockout?"]
+
+[families.unit_economics]
+role = "chief_of_staff"
+label = "Contribution margin per order (CM1, CM2)"
+status = "needs_data"
+needs = ["shipping and RTO cost per order", "payment gateway and marketplace fees", "ad spend by channel"]
+examples = ["Are we making money on each order before marketing?", "Is CM2 positive this month?"]
+
+# ------------------------------------------------------------------ replenishment
+[families.stock_cover]
+role = "replenishment"
+label = "Stock on hand and days of cover"
+status = "certified"
+tools = ["stock_position"]
+settings = ["product", "limit"]
+examples = ["How many days of stock do we have of the vitamin C serum?", "Which SKUs have under a week of cover?"]
+match = '''days of (stock|cover|supply)|under a week|stock on hand|how much stock'''
+gather = [{ tool = "stock_position", args = { name_contains = "$?product" } }]
+
+[families.stockouts]
+role = "replenishment"
+label = "Stockouts and lost sales"
+status = "certified"
+tools = ["stockout_events"]
+settings = ["min_days"]
+examples = ["What is out of stock right now?", "How much did the serum stockout cost us?"]
+match = '''out of stock|stock.?outs?\b'''
+gather = [{ tool = "stockout_events" }]
+
+[families.sell_through]
+role = "replenishment"
+label = "Sell-through, stock turn and cash in stock"
+status = "certified"
+tools = ["sell_through"]
+settings = ["period", "group_by"]
+examples = ["What is our sell-through by category this quarter?", "How fast is stock turning?",
+            "How much cash is tied up in stock, by category?", "Which category earns the most margin per rupee of stock (GMROI)?"]
+match = '''sell.?through|stock turn|turning|gmroi|tied up in stock|cash in stock|per rupee of stock'''
+gather = [{ tool = "sell_through", args = { start = "$start", end = "$end" } }]
+
+[families.slow_and_expiring]
+role = "replenishment"
+label = "Slow movers, expiry and markdown options"
+status = "certified"
+tools = ["slow_movers", "expiry_exposure", "markdown_scenarios"]
+settings = ["product", "batch"]
+examples = ["What should I do with stock about to expire?", "Which products are not moving?"]
+match = '''expir|slow.?mov|not moving|markdown'''
+gather = [{ tool = "expiry_exposure" }, { tool = "slow_movers" }]
+
+[families.reorder_plan]
+role = "replenishment"
+label = "What to reorder, how much, by when"
+status = "needs_data"
+needs = ["supplier lead time per SKU", "minimum order quantity", "open purchase orders"]
+examples = ["What should I reorder this week and how much?", "Will we stock out before the next PO lands?"]
+
+[families.inbound]
+role = "replenishment"
+label = "Goods received versus ordered"
+status = "needs_data"
+needs = ["purchase orders"]
+examples = ["Did the supplier deliver the full PO?", "Which POs are late?"]
+
+# ------------------------------------------------------------------ margin
+[families.margin_mix]
+role = "margin_control"
+label = "Margin by product, category and period"
+status = "certified"
+tools = ["top_skus", "category_performance", "get_sales_summary"]
+settings = ["period", "limit", "worst"]
+examples = ["Which categories are below our margin target?", "Worst 10 SKUs by margin last month"]
+match = '''margin|worst \d* ?(skus?|products?)|best.?sell|by category'''
+gather = [{ tool = "category_performance", args = { start = "$start", end = "$end" } }]
+
+[families.discount_leakage]
+role = "margin_control"
+label = "Discounts that lose margin"
+status = "certified"
+tools = ["discount_leakage"]
+settings = ["period"]
+examples = ["Did the Diwali sale lose us money?", "Which discounts are below target margin?"]
+match = '''discount|lose us money|leak|promo'''
+gather = [{ tool = "discount_leakage", args = { start = "$start", end = "$end" } }]
+
+[families.markdown_effectiveness]
+role = "margin_control"
+label = "Did the markdown work (lift, sell-through, margin given up)"
+status = "build_next"
+needs_tool = "markdown_effect: sales and margin before vs during a discount window, per SKU"
+examples = ["Did the 30% markdown on the eye cream clear the stock?", "Are customers waiting for discounts?"]
+
+[families.returns]
+role = "margin_control"
+label = "Returns by reason and category"
+status = "certified"
+tools = ["return_reasons"]
+settings = ["period"]
+examples = ["Why are returns high in makeup?", "How many returns are shade mismatch?"]
+match = '''\breturns?\b(?! to origin)|returning|shade mismatch'''
+gather = [{ tool = "return_reasons", args = { start = "$start", end = "$end" } }]
+
+# ------------------------------------------------------------------ finance
+[families.order_to_cash]
+role = "revenue_assurance"
+label = "Orders falling between website, billing and warehouse"
+status = "certified"
+tools = ["order_to_cash_gaps"]
+examples = ["Are any paid orders stuck?", "Which shipments have no invoice?"]
+match = '''\bpaid\b|stuck|unbilled|not billed|no invoice|without (an )?invoice|order.to.cash|reconcil'''
+gather = [{ tool = "order_to_cash_gaps" }]
+
+[families.refunds_cancellations]
+role = "revenue_assurance"
+label = "Refunds, cancellations and RTO"
+status = "certified"
+tools = ["order_list", "get_sales_summary"]
+settings = ["period", "status"]
+examples = ["How much did we refund last month?", "What is our RTO rate on COD?"]
+match = '''refund|cancell?(ed|ation)|\brto\b'''
+gather = [{ tool = "get_sales_summary", args = { start = "$start", end = "$end" } }]
+
+[families.cod_remittance]
+role = "revenue_assurance"
+label = "COD cash collected versus remitted by courier"
+status = "needs_data"
+needs = ["courier COD remittance reports"]
+examples = ["Has the courier paid us for all delivered COD orders?", "How much COD cash is pending with couriers?"]
+
+[families.marketplace_settlement]
+role = "revenue_assurance"
+label = "Marketplace payouts versus orders, fees and return credits"
+status = "needs_data"
+needs = ["marketplace settlement reports"]
+examples = ["Were we overcharged on commission or weight?", "Which return credits are missing?"]
+
+[families.tax_credits]
+role = "revenue_assurance"
+label = "TCS and TDS deducted versus claimed"
+status = "needs_data"
+needs = ["marketplace TCS statements", "GST returns"]
+examples = ["Have we claimed all the TCS the marketplaces deducted?"]
+
+[families.data_health]
+role = "revenue_assurance"
+label = "Can we trust the numbers"
+status = "certified"
+tools = ["data_quality"]
+examples = ["Are there duplicate invoices?", "Is the data complete?"]

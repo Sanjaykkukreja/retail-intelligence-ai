@@ -14,7 +14,7 @@ north_star = "paid_not_dispatched_value"
 guardrails = ["dispatched_not_billed"]
 outcome = "Gap counts and value falling after the team acts; no gap older than 3 days"
 autonomy = 1
-tools = ["order_to_cash_gaps", "fulfilment_speed", "get_sales_summary", "return_reasons", "list_findings",
+tools = ["order_list", "order_to_cash_gaps", "fulfilment_speed", "get_sales_summary", "return_reasons", "list_findings",
          "data_quality", "open_questions", "owner_answers", "record_answer", "list_recommendations",
          "decide_recommendation", "run_readonly_sql"]
 streams = ["orders", "invoices", "refunds", "dispatches", "web_purchases"]

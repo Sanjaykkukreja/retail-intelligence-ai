@@ -12,7 +12,7 @@ north_star = "rupees_at_stake"
 guardrails = ["high_findings"]
 outcome = "Decisions taken within 3 days; share of approved actions whose problem went away"
 autonomy = 1
-tools = ["get_briefing", "get_sales_summary", "compare_day", "top_skus", "category_performance", "discount_leakage",
+tools = ["order_list", "sell_through", "get_briefing", "get_sales_summary", "compare_day", "top_skus", "category_performance", "discount_leakage",
          "stock_position", "stockout_events", "expiry_exposure", "markdown_scenarios", "slow_movers", "website_funnel",
          "fulfilment_speed", "return_reasons", "order_to_cash_gaps", "list_findings", "data_quality", "open_questions",
          "owner_answers", "list_recommendations", "record_answer", "decide_recommendation", "update_business_rule",

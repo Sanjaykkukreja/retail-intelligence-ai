@@ -5,7 +5,9 @@ Consulting-first AI analyst for beauty D2C brands, built entirely on Claude. Pil
 ## Status (28 Nov 2026)
 - Live on Streamlit Community Cloud with Claude (Sonnet 5.5 answers, Haiku 5.5 routes).
 - Platform step 1 done: four role agents (Chief of staff, Replenishment planner, Margin controller, Revenue assurance) on one engine, plus two planned finance agents; control tower, role dashboards, agent catalog. 65 automated tests pass.
-- Next: Supabase so conversations, approvals and spend survive a redeploy; then the Zoho Books connector.
+- Permanent history (Supabase) is built and tested; it switches on when `SUPABASE_DB_URL` is in Streamlit Secrets.
+- Question library: 24 families (`docs/08_question_library.md`); every certified example question is routed correctly. 77 tests pass.
+- Next: actions v1 (email and hand-off with approvals), then the Zoho Books connector.
 - Not yet checked: the new screens in a real browser (they run against a stand-in in tests).
 
 ## Where everything lives
@@ -19,12 +21,14 @@ Consulting-first AI analyst for beauty D2C brands, built entirely on Claude. Pil
 | Design docs, README, changelog, sample briefing | This project |
 | Platform strategy (role agents, modular design, market) | `docs/05_platform_strategy.md` |
 | How to add an agent, tool, KPI or connector | `docs/06_platform_modules.md` |
+| Actions and assistant design | `docs/07_actions_and_assistant.md` |
+| Question library (what each role asks) | `docs/08_question_library.md` |
 
 Older copies in the Drive folder (`retail-intelligence-ai.zip`, `03_agent_design.md` at the top level) are from 24 Nov and are superseded.
 
 ## How a build session starts
 1. Open the chat inside this project, with the SMB Automation folder connected in the Claude desktop app. Claude reads the code from the folder directly; no zip upload needed. Without the folder, attach the latest zip.
-2. Claude runs the tests (65 today) and confirms the state before changing anything.
+2. Claude runs the tests (77 today) and confirms the state before changing anything.
 3. One goal per session; close with all tests passing and one CHANGELOG row.
 
 ## Locked rules (full list in the guide)

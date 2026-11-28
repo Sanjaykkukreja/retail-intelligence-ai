@@ -8,7 +8,7 @@
 | 3 | Run on your machine | README steps 1-8 complete; send any error back |
 | 3b | First live model run | `eval` summary sent back: routing, tool choice, key facts, grounding >= 90%; tokens, cache reads and cost per question recorded; Claude model chosen (Sonnet 5.5 unless Opus 5.5 is needed) |
 | P1 | Platform: role agents on one engine, plug points, data contract, control tower | DONE: 20 platform tests; 4 role agents run, 2 planned agents show missing data |
-| P2 | Saved history and spend (Supabase) | Conversations, runs, approvals survive a redeploy |
+| P2 | Saved history and spend (Supabase) + question library | Built and tested on real Postgres; live once `SUPABASE_DB_URL` is in Secrets. 24 families, every certified example routed |
 | P3 | Connector framework + Zoho Books (read-only, test org) | Streams filled by Zoho; mapping screen; agents run on Zoho data |
 | P4 | Actions at L2-L3 (draft PO, approvals inbox, audit log) | Nothing reaches a client system without approval and a log entry |
 | P5 | First finance agent on bills: PO-GRN-bill match | Catches planted overbilling on synthetic bills |
@@ -36,7 +36,9 @@ Mapping accuracy and no wrong auto-accept; renamed items; planted data-quality c
 
 Agent tests (tests/test_agent.py, 23 tests): retry policy; Claude request format with prompt caching and cache-aware cost; Claude as default provider; Haiku routes while Sonnet answers; optional OpenAI adapter format; model-only-when-unsure classification; date windows; 30-question routing; fast path makes no model call; concurrent diagnosis then grounded answer; sequential expiry then markdown; invented figure challenged then flagged; repair turn fixes it; SQL fallback only after failure; tools outside the plan refused; budget stops a runaway loop; cache hit and invalidation; usage and cost logged; short- and long-term memory; approval through the agent; recommendation lifecycle and outcome check; daily job.
 
-Platform tests (tests/test_platform.py, 20 tests): core never imports a plug-in; plug-ins register; duplicate names rejected; every agent file valid; a new agent is one file; bad files caught; readiness follows the data contract; client setup from Secrets; findings routed to the specialist; placeholders; role agent sees only its tools; off-role question stays inside the role; role core evidence always fetched and findings filtered; fast paths per role; budget per role; runs logged per agent; KPIs match planted problems; control tower and role dashboard; money format.
+State tests (tests/test_state.py, 4 tests, real Postgres): everything people did survives a redeploy; only new rows sent; clients kept apart; an outage loses and duplicates nothing.
+
+Platform tests (tests/test_platform.py, 28 tests; the last 8 cover order_list vs planted truth, sell-through totals, the question library, every certified example reaching its family, the definitions register driving the stuck-order count, and exploratory labels): core never imports a plug-in; plug-ins register; duplicate names rejected; every agent file valid; a new agent is one file; bad files caught; readiness follows the data contract; client setup from Secrets; findings routed to the specialist; placeholders; role agent sees only its tools; off-role question stays inside the role; role core evidence always fetched and findings filtered; fast paths per role; budget per role; runs logged per agent; KPIs match planted problems; control tower and role dashboard; money format.
 
 ## Known limits
 Synthetic data only. Estimates (lost sales, markdown outcomes) assume steady demand and an unmeasured elasticity. Thresholds (1.8x delay, 75% conversion drop) are tuned on this data and need re-tuning per client.

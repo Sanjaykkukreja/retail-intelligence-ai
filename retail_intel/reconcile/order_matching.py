@@ -12,7 +12,7 @@ import pandas as pd
 from .. import db
 from .sku_mapping import norm_ref
 
-STUCK_AFTER_DAYS = 4   # a paid order not dispatched after this many days counts as stuck
+from ..metrics.common import context
 
 
 def billing_dedup(conn) -> pd.DataFrame:
@@ -41,7 +41,8 @@ def build_order_xref(conn, as_of: str | None = None) -> pd.DataFrame:
     x["in_web"] = x["order_ref_n"].isin(set(wp["order_ref_n"]))
     if as_of is None:
         as_of = b["order_date"].max()
-    cutoff = (date.fromisoformat(as_of) - timedelta(days=STUCK_AFTER_DAYS)).isoformat()
+    stuck_after = int(context(conn)["stuck_after_days"])      # owner-signed rule, see the definitions register
+    cutoff = (date.fromisoformat(as_of) - timedelta(days=stuck_after)).isoformat()
     x["paid_not_dispatched"] = (x["billing_status"] == "paid") & (~x["in_wms"] | (x["wms_status"] == "PENDING")) \
         & (x["order_date"] <= cutoff)
     x["dispatched_not_billed"] = x["in_wms"] & ~x["in_billing"]

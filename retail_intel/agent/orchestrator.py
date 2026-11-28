@@ -61,6 +61,11 @@ class AgentResult:
     agent: str = "analyst"
 
     @property
+    def exploratory(self) -> bool:
+        """True when the answer leaned on a one-off query rather than certified (tested) tools."""
+        return any(e["tool"] == "run_readonly_sql" and e["ok"] for e in self.evidence)
+
+    @property
     def tools_used(self) -> list[str]:
         return [e["tool"] for e in self.evidence]
 
@@ -110,6 +115,7 @@ class Agent:
                 self._gather(plan, ctx, res)
                 if self.template and self.template.gather:      # the role's standing evidence, every question
                     self._gather_template(ctx, res)
+                self._gather_families(question, ctx, res)            # question families named by the question
                 if self.model is None:
                     res.answer = ("AI analyst is not configured (no API key), so here is the evidence it would have used:\n\n"
                                   + self._render_evidence(res.evidence))
@@ -150,6 +156,31 @@ class Agent:
         calls = [(g["tool"], a) for g in self.template.gather
                  if g["tool"] in self.allowed and (a := fill_args(g.get("args", {}), values)) is not None
                  and (g["tool"], json.dumps(a, sort_keys=True, default=str)) not in have]
+        if calls:
+            with ThreadPoolExecutor(max_workers=min(6, len(calls))) as ex:
+                for tr in ex.map(lambda c: self.box.call_ex(c[0], c[1]), calls):
+                    self._add_evidence(res, tr)
+
+    def _gather_families(self, question: str, ctx, res: AgentResult) -> None:
+        """Every question family whose trigger words appear in the question runs its standing check
+        (catalog/question_families.toml), limited to the tools this agent may use."""
+        from ..metrics.orders import parse_order_question
+        from ..platform.catalog import fill_args
+        from ..platform.questions import load_families, matching_families
+        fams = load_families()
+        values = dict(start=ctx.win.start, end=ctx.win.end, day=ctx.win.day, product=ctx.product, as_of=ctx.as_of,
+                      **parse_order_question(question))
+        have = {(e["tool"], json.dumps(e["args"], sort_keys=True, default=str)) for e in res.evidence}
+        calls = []
+        for fid in matching_families(question, fams):
+            for g in fams[fid].get("gather", []):
+                if self.allowed is not None and g["tool"] not in self.allowed:
+                    continue
+                a = fill_args(g.get("args", {}), values)
+                k = (g["tool"], json.dumps(a, sort_keys=True, default=str))
+                if a is not None and k not in have:
+                    have.add(k)
+                    calls.append((g["tool"], a))
         if calls:
             with ThreadPoolExecutor(max_workers=min(6, len(calls))) as ex:
                 for tr in ex.map(lambda c: self.box.call_ex(c[0], c[1]), calls):
@@ -247,6 +278,9 @@ class Agent:
                       + self._render_evidence(res.evidence))
         elif res.unsupported:
             answer += "\n\n_Check: these figures could not be traced to a tool result: " + ", ".join(res.unsupported) + "_"
+        if res.exploratory:
+            answer += ("\n\n_Exploratory answer: built from a one-off query, not a certified metric. "
+                       "Check before using it in a decision or report._")
         res.answer = answer
 
     # ------------------------------------------------------------------------------------------------ helpers
@@ -284,7 +318,8 @@ class Agent:
                         method text, pattern text, tools text, model text, input_tokens integer, output_tokens integer,
                         model_calls integer, cost_usd real, grounded integer, unsupported text, stopped text, latency_s real)""")
         for col, kind in (("cache_read_tokens", "integer"), ("cache_write_tokens", "integer"),
-                          ("win_start", "text"), ("win_end", "text"), ("win_day", "text"), ("agent", "text")):   # added later
+                          ("win_start", "text"), ("win_end", "text"), ("win_day", "text"), ("agent", "text"),
+                          ("exploratory", "integer")):   # added later
             try:
                 conn.execute(f"alter table agent_runs add column {col} {kind}")
             except Exception:
@@ -292,13 +327,14 @@ class Agent:
         w = res.window or {}
         conn.execute("""insert into agent_runs (run_id, session_id, ts, question, intent, method, pattern, tools, model,
                         input_tokens, output_tokens, model_calls, cost_usd, grounded, unsupported, stopped, latency_s,
-                        cache_read_tokens, cache_write_tokens, win_start, win_end, win_day, agent)
-                        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        cache_read_tokens, cache_write_tokens, win_start, win_end, win_day, agent, exploratory)
+                        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                      (res.run_id, res.session_id, datetime.now().isoformat(timespec="seconds"), question, res.intent, res.method,
                       res.pattern, json.dumps(res.tools_used), getattr(self.model, "model", "none"), res.usage.total_input_tokens,
                       res.usage.output_tokens, res.usage.calls, res.cost_usd, None if res.grounded is None else int(res.grounded),
                       json.dumps(res.unsupported), res.stopped, res.latency_s, res.usage.cache_read_tokens,
-                      res.usage.cache_write_tokens, w.get("start"), w.get("end"), w.get("day"), res.agent))
+                      res.usage.cache_write_tokens, w.get("start"), w.get("end"), w.get("day"), res.agent,
+                      int(res.exploratory)))
         conn.commit()
         memory.append(conn, res.session_id, "user", question)
         memory.append(conn, res.session_id, "assistant", res.answer)

@@ -12,6 +12,7 @@ The platform is one application built from separate modules. Each module plugs i
 | Connector | `retail_intel/connectors/*.py` | how to read (later write) one client system | `@connector` |
 | Data stream | `retail_intel/catalog/streams.toml` | a standard data shape (the data contract) | being in the file |
 | Client setup | `catalog/clients/demo.toml` (demo only) | connectors, switched-on agents, autonomy overrides | `CLIENT_CONFIG` setting |
+| Question family | `retail_intel/catalog/question_families.toml` | trigger words, the standing check, example questions, status | being in the file (see `08_question_library.md`) |
 
 The core that runs all of them: `platform/registry.py` (plug points), `platform/catalog.py` (reads agents, streams, clients; checks readiness), `platform/dashboards.py` (role pages and control tower), `agent/orchestrator.py` (one engine for every agent).
 
@@ -65,13 +66,27 @@ def fill_rate_28d(conn):
 
 Subclass `platform/connector.py: Connector`, list the `streams` it provides, implement `test` and `sync` (later `fetch` and `act`), and decorate with `@connector`. Set `status = "planned"` until it works; agents that need its streams then show as "missing data" rather than running on nothing.
 
+## Add a question family
+
+1. Add a `[families.<id>]` block to `catalog/question_families.toml`: role, label, status, tools, `match` (trigger words, a regular expression), `gather` (the check to run, with `$start`/`$end` for the question's period and `$?name` for optional settings), and 2+ example questions.
+2. If no existing tool fits, add one first (see "Add a tool").
+3. Run the tests. `test_certified_example_questions_reach_their_family` asks every example question and fails if routing does not reach your family.
+
+## Definitions register
+
+Every number depends on rules (margin target, dispatch promise, stuck-order days ...) and fixed definitions (net revenue, gross margin, stockout ...). They are listed in plain words in `platform/definitions.py` and on the Definitions page, where the owner signs them off and changes rules; every change is logged. A rule belongs in `config.DEFAULT_CONTEXT` and `definitions.RULES`, never as a constant inside a metric.
+
+## Permanent history (Supabase or any Postgres)
+
+`platform/state.py` keeps what people did (conversations, runs and cost, approvals, answers, rules, sign-offs, promotion requests) in one Postgres table, `ria_state`, keyed by client. Set `SUPABASE_DB_URL` (any Postgres connection string works; nothing Supabase-specific is used). Business data is never stored there; it is rebuilt from the client's systems. Tested against a real Postgres 16 server: restart, incremental saves, client separation, outage recovery.
+
 ## Autonomy ladder (per agent, per client)
 
 L0 inform · L1 recommend (all agents today) · L2 draft (e.g. a draft PO) · L3 act after approval · L4 act within limits. Payments and vendor bank changes never go above L3. Set per client in the client file under `[autonomy]`.
 
 ## What is not modular yet (honest list)
 
-- **Storage** is still SQLite through `db.py`. Moving conversations, runs and approvals to Supabase is the next step; the analytical tables stay rebuildable.
+- **Storage**: what people did is kept in Postgres (above); the analytical tables are still SQLite, rebuilt by the daily refresh. That is deliberate while data volumes are small.
 - **The data layer** (reconcile, core, findings) still reads the CSV connector's raw tables. API connectors (Zoho Books first) will land data in the standard streams, and the core build will read streams instead.
 - **Actions** (L2 and above) are not built: agents recommend; nothing writes to client systems.
 - **Question routing** (`agent/router.py`) is shared by all agents. Role agents narrow it; they do not have their own routes yet.

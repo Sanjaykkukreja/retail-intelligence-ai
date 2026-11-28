@@ -1,7 +1,7 @@
 """Component 5 - Interface. The owner's screen.   Run:  streamlit run app/streamlit_app.py
 
-NOTE: written in a workspace that could not run Streamlit. Every number comes from tested functions; only the
-screen layout is untested. If a page shows an error, send the message back and it will be fixed.
+NOTE: every page is run in the automated checks against a stand-in for Streamlit, so code errors are caught; how
+the pages look is only checked in a real browser. If a page shows an error, send the message back.
 """
 import os
 import sys
@@ -27,13 +27,16 @@ from retail_intel.platform.catalog import (active_agents, available_streams, loa
                                            readiness, validate)
 from retail_intel.platform.dashboards import agent_dashboard, control_tower, fmt_value
 from retail_intel.platform.registry import CONNECTORS, load_plugins
+from retail_intel.platform.definitions import change_rule, register, sign_off, RULES
+from retail_intel.platform.questions import family_summary, load_families, promotions, question_log, request_promotion
+from retail_intel.platform.state import StateStore
 
 st.set_page_config(page_title="Retail Intelligence AI", layout="wide")
 
 # Cloud hosting: keys pasted into Streamlit's "Secrets" box become environment variables for the agent.
 try:
     for _k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_ROUTER_MODEL", "AGENT_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL",
-               "CLIENT_CONFIG_TOML"):
+               "CLIENT_CONFIG_TOML", "SUPABASE_DB_URL"):
         if _k in st.secrets and not os.environ.get(_k):
             os.environ[_k] = str(st.secrets[_k])
 except Exception:  # no secrets configured (e.g. on a laptop) - fine
@@ -53,6 +56,37 @@ if not Path(DB_PATH).exists():
 
 conn = db.connect(DB_PATH)
 today = as_of(conn)
+load_plugins()
+client = load_client()
+
+
+@st.cache_resource(show_spinner="Loading saved history...")
+def state_store(client_id: str):
+    """Once per app start: connect to Supabase (if configured) and bring back everything people did."""
+    s = StateStore.from_env(client_id)
+    if s is None:
+        return None, "History is not saved permanently yet (no SUPABASE_DB_URL in Secrets)."
+    try:
+        s.ensure()
+        c = db.connect(DB_PATH)
+        n = s.restore(c)
+        c.close()
+        return s, f"History saved permanently ({sum(n.values())} records restored at start)."
+    except Exception as e:                                   # the app must still open if Supabase is down
+        return None, f"Could not reach the history store ({type(e).__name__}); changes this session are not saved."
+
+
+store, store_note = state_store(client.id)
+
+
+def persist():
+    """Send what changed to Supabase. Called after every question and every decision."""
+    if store is None:
+        return
+    try:
+        store.save(conn)
+    except Exception as e:
+        st.warning(f"Not saved to the history store this time ({type(e).__name__}). It will be sent with the next change.")
 
 
 @st.cache_data(show_spinner="Building today's briefing...")
@@ -65,14 +99,13 @@ def cached_briefing(version: str) -> dict:
 
 
 version = conn.execute("select max(run_at) from pipeline_runs").fetchone()[0] if db.table_exists(conn, "pipeline_runs") else "0"
-load_plugins()
-client = load_client()
 templates = load_templates()
 agents = active_agents(client, templates)
 by_id = {a.id: a for a in agents}
 
-PAGES = ["Control tower", "Ask an agent", "Role dashboards", "Agent catalog", "Recommendations", "Daily briefing",
-         "Findings and questions", "Trends", "Stock and expiry", "Data health", "Agent activity"]
+PAGES = ["Control tower", "Ask an agent", "Role dashboards", "Recommendations", "Conversations", "Questions asked",
+         "Definitions", "Agent catalog", "Spend", "Daily briefing", "Findings and questions", "Trends", "Stock and expiry",
+         "Data health"]
 if "page" not in st.session_state:
     st.session_state.page = PAGES[0]
 if st.session_state.get("dash_agent") not in by_id:
@@ -89,6 +122,7 @@ def go(page: str, agent_id: str | None = None, key: str = "dash_agent"):
 
 st.sidebar.title(client.name)
 st.sidebar.caption(f"Data through {today} | {len(agents)} agents active")
+st.sidebar.caption(store_note)
 page = st.sidebar.radio("Go to", PAGES, key="page")
 
 
@@ -112,11 +146,11 @@ def rec_list(recs: pd.DataFrame, key_prefix: str):
             note = st.text_input("Note (optional)", key=f"{key_prefix}n{r['id']}")
             c1, c2, c3 = st.columns(3)
             if r["status"] == "proposed" and c1.button("Approve", key=f"{key_prefix}a{r['id']}"):
-                decide(conn, int(r["id"]), True, note); st.rerun()
+                decide(conn, int(r["id"]), True, note); persist(); st.rerun()
             if r["status"] == "proposed" and c2.button("Reject", key=f"{key_prefix}r{r['id']}"):
-                decide(conn, int(r["id"]), False, note); st.rerun()
+                decide(conn, int(r["id"]), False, note); persist(); st.rerun()
             if r["status"] == "approved" and c3.button("Mark done", key=f"{key_prefix}d{r['id']}"):
-                mark_done(conn, int(r["id"]), note); st.rerun()
+                mark_done(conn, int(r["id"]), note); persist(); st.rerun()
 
 
 if page == "Control tower":
@@ -232,9 +266,10 @@ elif page == "Ask an agent":
             with st.spinner("Checking the data..."):
                 r = Agent.from_env(DB_PATH, template=t).ask(q, st.session_state.session_id)
             st.session_state.session_id = r.session_id
+            persist()
             st.markdown(r.answer)
             cost = f" | about ${r.cost_usd:.4f}" if r.cost_usd is not None else ""
-            st.caption(f"{r.agent} | {r.intent} | {r.pattern} | tools: {', '.join(r.tools_used) or 'none'} | "
+            st.caption(("EXPLORATORY | " if r.exploratory else "certified tools | ") + f"{r.agent} | {r.intent} | {r.pattern} | tools: {', '.join(r.tools_used) or 'none'} | "
                        f"{r.usage.total_input_tokens + r.usage.output_tokens} tokens ({r.usage.cache_read_tokens} from cache){cost} | {r.latency_s}s")
             if r.grounded is False:
                 st.warning("Some figures could not be traced to the data. Check them before acting.")
@@ -249,7 +284,7 @@ elif page == "Daily briefing":
 elif page == "Recommendations":
     st.header("Recommendations")
     if st.button("Check outcomes of approved actions"):
-        check_outcomes(conn)
+        check_outcomes(conn); persist()
     status = st.selectbox("Show", ["proposed", "approved", "done", "rejected", "expired", "all"])
     from retail_intel.platform.dashboards import recommendations_by_agent
     allr = recommendations_by_agent(conn, agents)
@@ -276,7 +311,7 @@ elif page == "Findings and questions":
                 else:
                     ans = st.text_input("Your answer", key=f"a_{r['id']}")
                     if st.button("Save answer", key=f"b_{r['id']}") and ans.strip():
-                        answer_question(conn, r["id"], ans.strip()); st.rerun()
+                        answer_question(conn, r["id"], ans.strip()); persist(); st.rerun()
 
 elif page == "Trends":
     st.header("Trends")
@@ -322,22 +357,137 @@ elif page == "Data health":
     st.subheader("How SKUs were matched")
     st.dataframe(db.read(conn, "select system, method, status, count(*) as n from sku_map group by 1,2,3"), use_container_width=True)
 
-else:
-    st.header("Agent activity")
-    st.caption("Every question, which agent answered it, what it cost.")
+elif page == "Conversations":
+    st.header("Conversations")
+    st.caption("Every conversation with every agent. Open one to read it, or carry it on where it stopped.")
+    if not db.table_exists(conn, "agent_messages"):
+        st.write("No conversations yet.")
+    else:
+        cols = [r[1] for r in conn.execute("pragma table_info(agent_runs)")] if db.table_exists(conn, "agent_runs") else []
+        sessions = db.read(conn, """select m.session_id, min(m.ts) as started, max(m.ts) as last, count(*) / 2 as questions,
+                                     (select content from agent_messages f where f.session_id = m.session_id and f.role = 'user'
+                                      order by f.rowid limit 1) as first_question
+                                    from agent_messages m group by m.session_id order by last desc limit 100""")
+        if "agent" in cols:
+            ag = db.read(conn, "select session_id, max(agent) as agent, sum(cost_usd) as cost_usd from agent_runs group by session_id")
+            sessions = sessions.merge(ag, on="session_id", how="left")
+        else:
+            sessions["agent"], sessions["cost_usd"] = "analyst", None
+
+        def resume(sid: str, agent_id: str):
+            msgs = conn.execute("select role, content from agent_messages where session_id=? order by rowid", (sid,)).fetchall()
+            st.session_state.chat = [(r[0], r[1]) for r in msgs]
+            st.session_state.session_id = sid
+            if agent_id in by_id:
+                st.session_state.ask_agent = agent_id
+                st.session_state.chat_agent = agent_id
+            st.session_state.page = "Ask an agent"
+
+        for _, sr in sessions.iterrows():
+            who = by_id[sr["agent"]].name if sr["agent"] in by_id else (sr["agent"] or "analyst")
+            cost = "" if pd.isna(sr["cost_usd"]) else f" | ${sr['cost_usd']:.3f}"
+            with st.expander(f"{sr['last'][:16].replace('T', ' ')} | {who} | {int(sr['questions'])} questions{cost} | {sr['first_question'][:70]}"):
+                for role, text in conn.execute("select role, content from agent_messages where session_id=? order by rowid",
+                                               (sr["session_id"],)).fetchall():
+                    st.markdown(f"**{'You' if role == 'user' else who}:** {text}")
+                st.button("Continue this conversation", key=f"res_{sr['session_id']}", on_click=resume,
+                          args=(sr["session_id"], sr["agent"]))
+
+elif page == "Questions asked":
+    st.header("Questions asked")
+    st.caption("Every question is sorted into a question family: one tested tool that answers many questions. "
+               "Questions that matched no family, or needed a one-off query, are the long tail. The ones that keep "
+               "coming back should become certified families.")
+    fams = load_families()
+    log = question_log(conn, fams)
+    summ = family_summary(log, fams)
+    c = st.columns(4)
+    c[0].metric("Questions asked", len(log))
+    c[1].metric("Answered by certified tools", f"{100 * (1 - log['exploratory'].mean()):.0f}%" if len(log) else "-")
+    c[2].metric("Families in the library", len(fams))
+    c[3].metric("Families waiting for data", int(sum(f["status"] == "needs_data" for f in fams.values())))
+    st.subheader("By family")
+    st.dataframe(summ[["label", "role", "status", "asked", "last_asked", "sample"]], use_container_width=True, hide_index=True)
+    st.subheader("Long tail: exploratory or no family")
+    tail = log[log["exploratory"]] if len(log) else log
+    if tail.empty:
+        st.success("Every question so far was answered by certified tools.")
+    for i, (_, tr) in enumerate(tail.head(30).iterrows()):
+        with st.expander(f"{tr['ts'][:10]} | {tr['agent']} | {tr['question'][:90]}"):
+            fam = st.selectbox("Closest family", ["(new family)"] + list(fams), key=f"pf_{i}")
+            note = st.text_input("What should the certified version do?", key=f"pn_{i}")
+            if st.button("Ask for this to be certified", key=f"pb_{i}"):
+                request_promotion(conn, tr["question"], "" if fam == "(new family)" else fam, note, "owner")
+                persist(); st.success("Added to the list for the next build.")
+    st.subheader("Waiting for data: what to ask the client for")
+    st.dataframe(pd.DataFrame([dict(family=f["label"], role=f["role"], needs=", ".join(f.get("needs", [])),
+                                    example=f["examples"][0]) for f in fams.values() if f["status"] == "needs_data"]),
+                 use_container_width=True, hide_index=True)
+    pr = promotions(conn)
+    if len(pr):
+        st.subheader("Requested for certification")
+        st.dataframe(pr, use_container_width=True, hide_index=True)
+
+elif page == "Definitions":
+    st.header("Definitions")
+    st.caption("Every rule the numbers depend on, in plain words. Rules are yours to set; definitions are built into "
+               "the tested code and change only with a test. Sign off each one so everyone knows who agreed it.")
+    reg = register(conn)
+    st.dataframe(reg[["kind", "name", "value", "meaning", "signed_off"]], use_container_width=True, hide_index=True)
+    st.subheader("Sign off")
+    who = st.text_input("Your name", key="so_who")
+    pick = st.selectbox("Rule or definition", list(reg["name"]), key="so_pick")
+    if st.button("Sign off"):
+        try:
+            sign_off(conn, pick, who); persist(); st.success(f"Signed off: {pick}"); st.rerun()
+        except ValueError as e:
+            st.error(str(e))
+    st.subheader("Change a rule")
+    key = st.selectbox("Rule", list(RULES), format_func=lambda k: RULES[k][0], key="cr_key")
+    cur = context(conn)[key]
+    val = st.number_input(f"New value ({RULES[key][1]})", value=float(cur), key="cr_val")
+    if st.button("Save rule"):
+        if not who.strip():
+            st.error("Enter your name above first.")
+        else:
+            change_rule(conn, key, val, who); persist()
+            st.success("Saved. Dashboards use it now; findings and order checks use it from the next daily refresh.")
+            st.rerun()
+    if db.table_exists(conn, "rule_changes"):
+        ch = db.read(conn, "select * from rule_changes order by changed_at desc")
+        if len(ch):
+            st.subheader("Rule change history")
+            st.dataframe(ch, use_container_width=True, hide_index=True)
+
+elif page == "Spend":
+    st.header("Spend")
+    st.caption("What the AI has cost: per day, per agent, per question. Data refreshes and dashboards cost nothing; "
+               "only questions to an agent call the AI.")
     if not db.table_exists(conn, "agent_runs"):
         st.write("No questions asked yet.")
     else:
         _cols = [r[1] for r in conn.execute("pragma table_info(agent_runs)")]
-        runs = db.read(conn, "select ts, " + ("agent, " if "agent" in _cols else "") + "question, intent, pattern, model, input_tokens, output_tokens, model_calls, cost_usd, "
-                             "grounded, stopped, latency_s from agent_runs order by ts desc limit 200")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Questions", len(runs))
-        c2.metric("Tokens", f"{int(runs['input_tokens'].sum() + runs['output_tokens'].sum()):,}")
-        c3.metric("Answered without a model call", f"{100 * (runs['model_calls'] == 0).mean():.0f}%")
-        st.dataframe(runs, use_container_width=True)
+        runs = db.read(conn, "select ts, " + ("agent, " if "agent" in _cols else "'analyst' as agent, ")
+                       + "question, intent, pattern, model, input_tokens, output_tokens, model_calls, cost_usd, "
+                       + ("cache_read_tokens, " if "cache_read_tokens" in _cols else "")
+                       + "grounded, stopped, latency_s from agent_runs order by ts desc")
+        runs["cost_usd"] = runs["cost_usd"].fillna(0)
+        asked = runs[runs["model_calls"] > 0]
+        c = st.columns(4)
+        c[0].metric("Total AI spend", f"${runs['cost_usd'].sum():.2f}")
+        c[1].metric("Questions", len(runs))
+        c[2].metric("Average per AI-answered question", f"${asked['cost_usd'].mean():.3f}" if len(asked) else "-")
+        c[3].metric("Answered without an AI call", f"{100 * (runs['model_calls'] == 0).mean():.0f}%")
+        st.subheader("Per day")
+        st.bar_chart(runs.assign(day=runs["ts"].str[:10]).groupby("day")["cost_usd"].sum())
+        st.subheader("Per agent")
+        st.dataframe(runs.groupby("agent").agg(questions=("question", "size"), cost_usd=("cost_usd", "sum"),
+                                               avg_seconds=("latency_s", "mean")).round(3).reset_index(),
+                     use_container_width=True, hide_index=True)
+        st.subheader("Every question")
+        st.dataframe(runs, use_container_width=True, hide_index=True)
     if db.table_exists(conn, "tool_calls_log"):
-        st.subheader("Tool calls (cache hits are free)")
+        st.subheader("Tool calls (cache hits are free and instant)")
         st.dataframe(db.read(conn, "select tool, count(*) calls, sum(cached) cache_hits, sum(1 - ok) errors, "
                                    "round(avg(ms)) avg_ms from tool_calls_log group by tool order by calls desc"),
-                     use_container_width=True)
+                     use_container_width=True, hide_index=True)

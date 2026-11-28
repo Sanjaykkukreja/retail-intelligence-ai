@@ -227,7 +227,8 @@ def reconciliation_findings(conn, as_of, monthly_rev):
         val = db.read(conn, "select sum(taxable_value) v from fact_order_line where order_ref in (%s)" %
                       ",".join("?" * len(stuck)), tuple(stuck["order_ref_n"]))["v"][0] or 0
         out.append(_f("paid_not_dispatched", "all", as_of, _severity(val, monthly_rev),
-                      f"{len(stuck)} paid orders have not been dispatched after 4+ days (oldest {stuck['order_date'].min()})",
+                      f"{len(stuck)} paid orders have not been dispatched after {int(context(conn)['stuck_after_days'])}+ days "
+                      f"(oldest {stuck['order_date'].min()})",
                       val, dict(orders=len(stuck), oldest=stuck["order_date"].min(),
                                 sample=stuck.sort_values("order_date")["order_ref_n"].head(10).tolist()),
                       "Why are these orders stuck: out of stock, pick-and-pack, address problem, or a billing-to-warehouse sync failure?",

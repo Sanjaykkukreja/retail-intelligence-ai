@@ -6,7 +6,7 @@ Underneath, the data layer joins three systems that name every product different
 
 Built on the standard five agent components (reasoning model, tools, memory, task manager, interface), all on Claude: Claude Sonnet 5.5 reasons and answers, Claude Haiku 5.5 routes unclear questions. See `docs/03_agent_design.md` for how each maps to the course.
 
-**Tested (65 automated tests):** the plug-in structure (core never hard-wires a plug-in), agent catalog validity, data-contract readiness, role agents staying within their tools, role dashboards and control tower; data pipeline and revenue tie-out; detection of every planted problem; the agent's routing, concurrent / sequential / fallback patterns, budgets, caching, grounding check, memory, approvals; recommendation lifecycle; daily job; Claude API request format, prompt caching and cost (against fakes).
+**Tested (77 automated tests):** permanent history on a real Postgres server; the question library (every certified example question reaches its family); order and sell-through tools against planted truth; the plug-in structure (core never hard-wires a plug-in), agent catalog validity, data-contract readiness, role agents staying within their tools, role dashboards and control tower; data pipeline and revenue tie-out; detection of every planted problem; the agent's routing, concurrent / sequential / fallback patterns, budgets, caching, grounding check, memory, approvals; recommendation lifecycle; daily job; Claude API request format, prompt caching and cost (against fakes).
 **Not yet tested:** live calls to the Claude API (needs your API key), and the screen layout in a browser.
 **All data is synthetic.** It proves the logic, not that a real client's data will behave.
 
@@ -23,7 +23,7 @@ Built on the standard five agent components (reasoning model, tools, memory, tas
    `(.venv)` appears at the start of the line. Repeat the activate command in every new terminal window.
 5. **Install packages:** `pip install -r requirements.txt`
 6. **Build everything:** `python -m retail_intel all` (about a minute; ends by printing the briefing).
-7. **Run the tests:** `python -m pytest` and expect `42 passed` (about 1.5 minutes).
+7. **Run the tests:** `python -m pytest` and expect `73 passed, 4 skipped` (about 2 minutes; the 4 history tests need a local Postgres and are skipped without one).
 8. **Open the screen:** `streamlit run app/streamlit_app.py`. A browser tab opens. Stop with Ctrl+C.
 9. **Turn on the AI analyst** (everything else works without it).
    a. Create a Claude API key in the Claude Console (platform.claude.com): API Keys, Create Key. Add credit under Billing. API use is billed separately from a Claude chat plan.
@@ -61,6 +61,7 @@ retail_intel/
   platform/                           plug points (registry), catalog loader + readiness, connector plug, dashboards
   catalog/                            agents/*.toml (role agents) | streams.toml (data contract) | clients/demo.toml
   tools/ kpis/ connectors/            plug-ins: one file per area, picked up automatically
+  catalog/question_families.toml      the question library (see docs/08_question_library.md)
   agent/                              models (API client) | toolbox runtime | memory | router (decision matrix) | orchestrator | grounding | prompts
   eval/                               30-question evaluation set and runner
 app/ tests/ docs/ data/ (generated; safe to delete, rebuilt by step 6)

@@ -19,12 +19,12 @@ from .models import ModelClient, Usage
 
 # ----------------------------------------------------------------------------- classification
 RULES = [  # (intent, weight, pattern) - order also breaks ties
-    ("briefing", 3, r"\bbrief(ing)?\b|how('?s| is| was) (my |the )?business|how('re| are| is) (we|things) doing|summar(y|ise|ize)|what should i (focus|do|look)|"
+    ("briefing", 3, r"\bbrief(ing)?\b|how('?s| is| was) (my |the )?business|how('re| are| is) (we|things) doing|summar(y|ise|ize)|what should i (focus on|look at)\b|what should i do (today|this week|first|now)\b|"
                     r"top (\d|three|five) (things|actions|priorities)|morning (report|summary|update)"),
     ("recommendations", 3, r"\brecommendations?\b|\bapprov|\breject|pending decisions?|waiting for my (approval|decision)|action list"),
     ("owner_input", 3, r"\b(was|is) (a |an )?(planned|intentional|deliberate|supplier delay)|\bthe reason (was|is)\b|"
                        r"\bnew stock arrives\b|\barrives? (on|by)?\s*\d|\bour (margin )?target is\b|\bset (the |our )?(margin|target)"),
-    ("data_quality", 3, r"data (quality|health)|\breliable\b|\btrust\b|\bduplicat|\bsku map|\bmapping\b|reconcil|mismatch|missing data"),
+    ("data_quality", 3, r"data (quality|health)|\breliable\b|\btrust\b|\bduplicat|\bsku map|\bmapping\b|reconcil|data mismatch|mismatch between (systems|the systems)|missing data|is the data complete|data (is )?complete"),
     ("diagnose", 2, r"\bwhy\b|\bdecline|\bdrop|\bdip\b|\bfell\b|\bfall\b|\bjump|\bspike|root cause|what happened|went wrong"),
     ("expiry", 2, r"expir|shelf.?life|markdown|clearance|liquidat|\bbatch(es)?\b"),
     ("inventory", 2, r"\bstock|restock|inventory|reorder|replenish|days of (cover|supply)|slow.?mov|overstock|excess"),
@@ -185,7 +185,7 @@ def product_hint(conn, q: str) -> str | None:
 
 
 # ----------------------------------------------------------------------------- decision matrix
-READ_TOOLS = ["get_sales_summary", "compare_day", "top_skus", "category_performance", "discount_leakage", "stock_position",
+READ_TOOLS = ["order_list", "sell_through", "get_sales_summary", "compare_day", "top_skus", "category_performance", "discount_leakage", "stock_position",
               "stockout_events", "expiry_exposure", "markdown_scenarios", "slow_movers", "website_funnel", "fulfilment_speed",
               "return_reasons", "list_findings", "data_quality", "owner_answers", "list_recommendations"]
 
@@ -229,11 +229,6 @@ def _prior(c: Ctx) -> dict:
     return dict(start=_iso(s - timedelta(days=n)), end=_iso(s - timedelta(days=1)))
 
 
-# Questions about orders falling between systems get the order-to-cash check, with its profile of the stuck orders.
-ORDER_TO_CASH = re.compile(r"\bpaid\b|stuck|pending|unbilled|not billed|no invoice|without invoice|not dispatched|"
-                           r"not shipped|unshipped|order.to.cash|reconcil", re.I)
-
-
 def _diagnose_gather(c: Ctx) -> list:
     g = [("compare_day", dict(day=c.win.day))] if c.win.day else []
     return g + [("get_sales_summary", _w(c)), ("get_sales_summary", _prior(c)), ("website_funnel", _wpad(c)),
@@ -257,9 +252,11 @@ PLANS: dict[str, Plan] = {
     "owner_input": Plan("conditional", ["open_questions", "owner_answers", "record_answer", "update_business_rule"],
                         gather=lambda c: [("open_questions", {})]),
     "diagnose": Plan("concurrent", READ_TOOLS, gather=_diagnose_gather),
-    "sales": Plan("conditional", ["get_sales_summary", "compare_day", "top_skus", "category_performance", "list_findings"],
+    "sales": Plan("conditional", ["get_sales_summary", "compare_day", "top_skus", "category_performance", "order_list",
+                                  "sell_through", "list_findings"],
                   gather=lambda c: [("compare_day", dict(day=c.win.day))] if c.win.day else [("get_sales_summary", _w(c))]),
-    "inventory": Plan("conditional", ["stock_position", "stockout_events", "slow_movers", "expiry_exposure", "list_findings"],
+    "inventory": Plan("conditional", ["stock_position", "stockout_events", "slow_movers", "expiry_exposure", "sell_through",
+                                      "order_list", "list_findings"],
                       gather=lambda c: [("stock_position", dict(name_contains=c.product)), ("stockout_events", {})] if c.product
                       else [("stockout_events", {}), ("stock_position", {})]),
     "expiry": Plan("sequential", ["expiry_exposure", "markdown_scenarios", "slow_movers"],
@@ -267,12 +264,11 @@ PLANS: dict[str, Plan] = {
     "pricing": Plan("conditional", ["discount_leakage", "category_performance", "top_skus", "get_sales_summary"],
                     gather=lambda c: [("discount_leakage", _w(c) if "diwali" not in c.q.lower()
                                        else dict(start=f"{c.as_of[:4]}-10-15", end=c.as_of))]),
-    "operations": Plan("concurrent", ["fulfilment_speed", "order_to_cash_gaps", "list_findings", "data_quality"],
+    "operations": Plan("concurrent", ["fulfilment_speed", "order_list", "order_to_cash_gaps", "list_findings", "data_quality"],
                        gather=lambda c: [("fulfilment_speed", _wpad(c)), ("list_findings", _findings_in(c, 10)),
-                                         ("data_quality", {})]
-                       + ([("order_to_cash_gaps", {})] if ORDER_TO_CASH.search(c.q) else [])),
+                                         ("data_quality", {})]),
     "web": Plan("conditional", ["website_funnel", "get_sales_summary", "list_findings"], gather=lambda c: [("website_funnel", _w(c))]),
-    "returns": Plan("conditional", ["return_reasons", "top_skus"], gather=lambda c: [("return_reasons", _w(c))]),
+    "returns": Plan("conditional", ["return_reasons", "top_skus", "order_list"], gather=lambda c: [("return_reasons", _w(c))]),
     "general": Plan("conditional", READ_TOOLS),
 }
 

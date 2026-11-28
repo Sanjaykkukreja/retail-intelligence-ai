@@ -20,6 +20,7 @@ DEFAULT_CONTEXT = {
     "low_stock_days_of_supply": 7,    # below this a SKU needs a reorder now
     "expiry_horizon_days": 90,        # batches expiring within this window are watched
     "dispatch_sla_hours": 48,         # order-to-dispatch promise
+    "stuck_after_days": 4,            # a paid order not dispatched after this many days counts as stuck
     "markdown_elasticity": 1.5,       # ASSUMPTION: +1.5% units per +1% discount (untested)
     "lookback_days": 28,              # window used for run-rates
 }

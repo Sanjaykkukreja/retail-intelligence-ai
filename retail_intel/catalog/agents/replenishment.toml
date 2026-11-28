@@ -12,7 +12,7 @@ north_star = "stockout_lost_sales"
 guardrails = ["slow_mover_stock_value", "expiry_value_at_risk"]
 outcome = "Stockout days and lost sales after an approved reorder, versus before"
 autonomy = 1
-tools = ["stock_position", "stockout_events", "slow_movers", "expiry_exposure", "markdown_scenarios", "top_skus",
+tools = ["order_list", "sell_through", "stock_position", "stockout_events", "slow_movers", "expiry_exposure", "markdown_scenarios", "top_skus",
          "get_sales_summary", "list_findings", "open_questions", "owner_answers", "record_answer",
          "list_recommendations", "decide_recommendation"]
 streams = ["products", "stock_daily", "batches", "order_lines", "receipts"]
@@ -35,6 +35,11 @@ args = { limit = 15 }
 title = "Stockouts (ongoing first)"
 tool = "stockout_events"
 args = { limit = 10 }
+
+[[dashboard.tables]]
+title = "Sell-through, stock turn and cash in stock, last 90 days"
+tool = "sell_through"
+args = { start = "$d90", end = "$today" }
 
 [[dashboard.tables]]
 title = "Batches that will not sell before expiry"
