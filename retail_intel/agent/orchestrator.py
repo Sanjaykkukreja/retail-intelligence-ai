@@ -24,7 +24,7 @@ from ..metrics.common import as_of as _as_of
 from . import memory, router
 from .grounding import unsupported_numbers
 from .models import ModelClient, Usage, cost_usd
-from .prompts import REPAIR, SYSTEM
+from .prompts import REPAIR, build_system
 from .tools import Toolbox, is_empty
 
 # A follow-up that points back ("on those days", "that week", "during it") keeps the previous question's period.
@@ -58,6 +58,7 @@ class AgentResult:
     session_id: str = ""
     run_id: str = ""
     window: dict | None = None
+    agent: str = "analyst"
 
     @property
     def tools_used(self) -> list[str]:
@@ -66,18 +67,23 @@ class AgentResult:
 
 class Agent:
     @classmethod
-    def from_env(cls, db_path, budget: Budget | None = None) -> "Agent":
+    def from_env(cls, db_path, budget: Budget | None = None, template=None) -> "Agent":
         """Claude Sonnet answers, Claude Haiku routes; with no API key the agent runs in evidence-only mode."""
         from .models import make_model
-        return cls(db_path, make_model("answer"), budget, router_model=make_model("router"))
+        return cls(db_path, make_model("answer"), budget, router_model=make_model("router"), template=template)
 
     def __init__(self, db_path, model: ModelClient | None = None, budget: Budget | None = None,
-                 router_model: ModelClient | None = None):
+                 router_model: ModelClient | None = None, template=None):
+        """template: a role agent from the catalog (catalog/agents/*.toml). None = the general analyst.
+        The same engine runs every role; the template only narrows tools, evidence, prompt and budget."""
         self.db_path = str(db_path)
         self.model = model
         self.router_model = router_model or model     # Haiku when configured: classification is a cheap job
-        self.budget = budget or Budget()
+        self.template = template
+        tb = (template.budget if template else {}) or {}
+        self.budget = budget or Budget(**{k: v for k, v in tb.items() if k in Budget.__dataclass_fields__})
         self.box = Toolbox(self.db_path)
+        self.allowed = set(template.tools) if template else None
 
     # ------------------------------------------------------------------------------------------------ public
     def ask(self, question: str, session_id: str | None = None) -> AgentResult:
@@ -92,8 +98,9 @@ class Agent:
                 prev = self._last_window(conn, session_id)
                 if prev:
                     ctx.win = router.Window(prev[0], prev[1], prev[2], "same period as the previous question", True)
-            plan = router.PLANS[cls.intent]
-            res = AgentResult("", cls.intent, cls.method, plan.pattern, usage=Usage().add(cls.usage), session_id=session_id)
+            plan = self._scoped(router.PLANS[cls.intent])
+            res = AgentResult("", cls.intent, cls.method, plan.pattern, usage=Usage().add(cls.usage), session_id=session_id,
+                              agent=self.template.id if self.template else "analyst")
             if ctx.win.explicit:
                 res.window = dict(start=ctx.win.start, end=ctx.win.end, day=ctx.win.day)
 
@@ -101,6 +108,8 @@ class Agent:
                 res.answer, res.pattern = self._fast_path(conn, plan.fast_path, res), "fast_path"
             else:
                 self._gather(plan, ctx, res)
+                if self.template and self.template.gather:      # the role's standing evidence, every question
+                    self._gather_template(ctx, res)
                 if self.model is None:
                     res.answer = ("AI analyst is not configured (no API key), so here is the evidence it would have used:\n\n"
                                   + self._render_evidence(res.evidence))
@@ -113,6 +122,38 @@ class Agent:
             return res
         finally:
             conn.close()
+
+    # ------------------------------------------------------------------------------------------------ role scope
+    def _scoped(self, plan):
+        """Narrow a question plan to the role's tools. Off-role questions fall back to the role's own tool set."""
+        if self.template is None:
+            return plan
+        ok = self.allowed
+        tools = [t for t in plan.tools if t in ok] or [t for t in self.template.tools if t != "run_readonly_sql"]
+        types = None if "*" in self.template.finding_types else list(self.template.finding_types)
+
+        def focus(call):                       # a specialist's findings list shows only the issues it owns
+            name, args = call
+            return (name, {**args, "types": types}) if name == "list_findings" and types else call
+
+        gather = (lambda c, g=plan.gather: [focus(x) for x in g(c) if x[0] in ok])
+        followup = None if plan.followup is None else (
+            lambda c, ev, f=plan.followup: [x for x in f(c, ev) if x[0] in ok])
+        fast = plan.fast_path if plan.fast_path in self.template.fast_paths else None
+        return router.Plan(plan.pattern, tools, gather, followup, fast,
+                           plan.allow_sql_now and "run_readonly_sql" in ok)
+
+    def _gather_template(self, ctx, res: AgentResult) -> None:
+        from ..platform.catalog import fill_args
+        values = dict(start=ctx.win.start, end=ctx.win.end, day=ctx.win.day, product=ctx.product, as_of=ctx.as_of)
+        have = {(e["tool"], json.dumps(e["args"], sort_keys=True, default=str)) for e in res.evidence}
+        calls = [(g["tool"], a) for g in self.template.gather
+                 if g["tool"] in self.allowed and (a := fill_args(g.get("args", {}), values)) is not None
+                 and (g["tool"], json.dumps(a, sort_keys=True, default=str)) not in have]
+        if calls:
+            with ThreadPoolExecutor(max_workers=min(6, len(calls))) as ex:
+                for tr in ex.map(lambda c: self.box.call_ex(c[0], c[1]), calls):
+                    self._add_evidence(res, tr)
 
     # ------------------------------------------------------------------------------------------------ steps
     @staticmethod
@@ -157,7 +198,7 @@ class Agent:
 
     def _reason(self, conn, question, hist, plan, res: AgentResult) -> None:
         b = self.budget
-        system = SYSTEM + memory.long_term_context(conn)
+        system = build_system(self.template) + memory.long_term_context(conn)
         user = (f"QUESTION: {question}\n\nEVIDENCE already gathered for this question "
                 f"(pattern: {plan.pattern}):\n{self._format_evidence(res.evidence) or '(none - use the tools)'}")
         conv = self.model.conversation(system, hist, user)
@@ -170,7 +211,8 @@ class Agent:
                 res.stopped = "token_budget"; break
             if b.max_cost_usd is not None and (cost_usd(res.usage) or 0) >= b.max_cost_usd:
                 res.stopped = "cost_budget"; break
-            offered = plan.tools + (["run_readonly_sql"] if fallback else [])
+            sql_ok = self.allowed is None or "run_readonly_sql" in self.allowed
+            offered = plan.tools + (["run_readonly_sql"] if fallback and sql_ok else [])
             turn = conv.step(self.box.schemas(offered))
             res.usage.add(turn.usage)
             if not turn.tool_calls:                                             # early termination: model is done
@@ -242,7 +284,7 @@ class Agent:
                         method text, pattern text, tools text, model text, input_tokens integer, output_tokens integer,
                         model_calls integer, cost_usd real, grounded integer, unsupported text, stopped text, latency_s real)""")
         for col, kind in (("cache_read_tokens", "integer"), ("cache_write_tokens", "integer"),
-                          ("win_start", "text"), ("win_end", "text"), ("win_day", "text")):   # columns added later
+                          ("win_start", "text"), ("win_end", "text"), ("win_day", "text"), ("agent", "text")):   # added later
             try:
                 conn.execute(f"alter table agent_runs add column {col} {kind}")
             except Exception:
@@ -250,13 +292,13 @@ class Agent:
         w = res.window or {}
         conn.execute("""insert into agent_runs (run_id, session_id, ts, question, intent, method, pattern, tools, model,
                         input_tokens, output_tokens, model_calls, cost_usd, grounded, unsupported, stopped, latency_s,
-                        cache_read_tokens, cache_write_tokens, win_start, win_end, win_day)
-                        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        cache_read_tokens, cache_write_tokens, win_start, win_end, win_day, agent)
+                        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                      (res.run_id, res.session_id, datetime.now().isoformat(timespec="seconds"), question, res.intent, res.method,
                       res.pattern, json.dumps(res.tools_used), getattr(self.model, "model", "none"), res.usage.total_input_tokens,
                       res.usage.output_tokens, res.usage.calls, res.cost_usd, None if res.grounded is None else int(res.grounded),
                       json.dumps(res.unsupported), res.stopped, res.latency_s, res.usage.cache_read_tokens,
-                      res.usage.cache_write_tokens, w.get("start"), w.get("end"), w.get("day")))
+                      res.usage.cache_write_tokens, w.get("start"), w.get("end"), w.get("day"), res.agent))
         conn.commit()
         memory.append(conn, res.session_id, "user", question)
         memory.append(conn, res.session_id, "assistant", res.answer)

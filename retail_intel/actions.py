@@ -57,7 +57,7 @@ def sync_recommendations(conn, findings: list[dict]) -> dict:
 
 def list_recommendations(conn, status: str | None = None) -> pd.DataFrame:
     ensure(conn)
-    sql = "select id, status, severity, title, action, est_impact_inr, decision_note, outcome_note from recommendations"
+    sql = "select id, status, type, severity, title, action, est_impact_inr, decision_note, outcome_note from recommendations"
     df = db.read(conn, sql + (" where status = ?" if status else "") +
                  " order by case severity when 'high' then 0 when 'medium' then 1 else 2 end, est_impact_inr desc",
                  (status,) if status else ())

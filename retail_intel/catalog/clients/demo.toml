@@ -1,0 +1,13 @@
+# Demo client: synthetic GlowBasket data. A real client's file holds private settings and lives OUTSIDE this
+# public repo (set CLIENT_CONFIG to its path, or paste it into Streamlit Secrets as CLIENT_CONFIG_TOML).
+id = "glowbasket"
+name = "GlowBasket (demo)"
+connectors = ["csv_files"]
+enabled_agents = ["chief_of_staff", "replenishment", "margin_control", "revenue_assurance", "ap_three_way_match"]
+default_agent = "chief_of_staff"
+
+[connector_settings.csv_files]
+source_dir = "data/source"
+
+[autonomy]
+# per-agent overrides, e.g. replenishment = 2 once draft POs are built

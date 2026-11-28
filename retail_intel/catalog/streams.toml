@@ -1,0 +1,79 @@
+# The data contract: standard data shapes shared by every agent and connector.
+# Agents say which streams they need; connectors say which streams they provide.
+# personal_data = true marks streams that may carry customer details (keep to hashed IDs under the DPDP Rules).
+
+[streams.products]
+label = "Products (master SKU, category, cost, MRP)"
+fields = ["master_sku_id", "name", "category", "unit_cost", "mrp", "barcode"]
+freshness_hours = 168
+
+[streams.orders]
+label = "Orders"
+fields = ["order_ref", "order_date", "channel", "status", "payment_mode", "customer_id_hash"]
+freshness_hours = 24
+personal_data = true
+
+[streams.order_lines]
+label = "Order lines"
+fields = ["order_ref", "line_no", "master_sku_id", "qty", "mrp", "discount_amt", "taxable_value", "tax_amt"]
+freshness_hours = 24
+
+[streams.invoices]
+label = "Invoices"
+fields = ["invoice_no", "order_ref", "invoice_date", "taxable_value", "tax_amt", "status"]
+freshness_hours = 24
+
+[streams.refunds]
+label = "Refunds and credit notes"
+fields = ["order_ref", "refund_date", "amount_ex_tax", "reason"]
+freshness_hours = 24
+
+[streams.stock_daily]
+label = "Stock on hand by day"
+fields = ["date", "master_sku_id", "batch_no", "qty"]
+freshness_hours = 24
+
+[streams.batches]
+label = "Batches and expiry dates"
+fields = ["master_sku_id", "batch_no", "expiry_date", "unit_cost"]
+freshness_hours = 24
+
+[streams.receipts]
+label = "Goods received (GRN)"
+fields = ["receipt_date", "master_sku_id", "batch_no", "qty", "unit_cost", "po_ref"]
+freshness_hours = 24
+
+[streams.dispatches]
+label = "Warehouse dispatches"
+fields = ["order_ref", "received_at", "dispatched_at", "status"]
+freshness_hours = 24
+
+[streams.web_sessions]
+label = "Website sessions and funnel"
+fields = ["date", "sessions", "item_views", "add_to_cart", "checkouts", "purchases"]
+freshness_hours = 24
+
+[streams.web_purchases]
+label = "Website purchases"
+fields = ["transaction_id", "date", "item_id", "quantity"]
+freshness_hours = 24
+
+[streams.purchase_orders]
+label = "Purchase orders"
+fields = ["po_ref", "vendor_id", "po_date", "master_sku_id", "qty", "unit_price", "status"]
+freshness_hours = 24
+
+[streams.bills]
+label = "Vendor bills"
+fields = ["bill_no", "vendor_id", "po_ref", "bill_date", "master_sku_id", "qty", "unit_price", "amount", "gstin"]
+freshness_hours = 24
+
+[streams.vendor_payments]
+label = "Vendor payments"
+fields = ["payment_id", "vendor_id", "bill_no", "paid_date", "amount"]
+freshness_hours = 24
+
+[streams.settlements]
+label = "Marketplace settlements (Amazon, Flipkart, Nykaa)"
+fields = ["settlement_id", "marketplace", "order_ref", "settled_date", "sale_amount", "fees", "returns", "net_paid"]
+freshness_hours = 24

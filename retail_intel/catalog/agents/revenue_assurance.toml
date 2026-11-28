@@ -1,0 +1,39 @@
+id = "revenue_assurance"
+name = "Revenue assurance"
+role = "Finance and controller"
+status = "ready"
+goal = "Make sure every rupee earned is billed, shipped and collected: catch orders that fall between the three systems."
+focus = """Think like a financial controller doing order-to-cash reconciliation. Lead with the gap that costs most:
+paid orders not dispatched (customer has paid, risk of refunds and complaints), then shipments with no invoice
+(revenue and GST not booked). Give counts, value where billed, and sample order numbers for the team to chase.
+When a value is unknown (no invoice), say so; never estimate it."""
+decisions = ["Which stuck orders the warehouse must ship today", "Which shipments finance must invoice",
+             "Whether a gap is a process fault to fix at source"]
+cadence = "Daily reconciliation; month-end close check"
+north_star = "paid_not_dispatched_value"
+guardrails = ["dispatched_not_billed"]
+outcome = "Gap counts and value falling after the team acts; no gap older than 3 days"
+autonomy = 1
+tools = ["order_to_cash_gaps", "fulfilment_speed", "get_sales_summary", "return_reasons", "list_findings",
+         "data_quality", "open_questions", "owner_answers", "record_answer", "list_recommendations",
+         "decide_recommendation", "run_readonly_sql"]
+streams = ["orders", "invoices", "refunds", "dispatches", "web_purchases"]
+kpis = ["paid_not_dispatched", "paid_not_dispatched_value", "dispatched_not_billed", "avg_dispatch_hours_7d", "refunds_28d"]
+finding_types = ["paid_not_dispatched", "dispatched_not_billed", "web_tracking_gap", "dispatch_delay"]
+gather = [{ tool = "order_to_cash_gaps" }]
+starter_questions = ["Are any paid orders stuck?", "Which shipments have no invoice?",
+                     "Is anything leaking between website, billing and warehouse?"]
+
+[budget]
+max_steps = 5
+max_cost_usd = 0.15
+
+[[dashboard.tables]]
+title = "Order-to-cash gaps"
+tool = "list_findings"
+args = { types = ["paid_not_dispatched", "dispatched_not_billed", "web_tracking_gap"], current_only = false }
+
+[[dashboard.tables]]
+title = "Dispatch speed, last 28 days"
+tool = "fulfilment_speed"
+args = { start = "$d28", end = "$today" }

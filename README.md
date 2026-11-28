@@ -1,10 +1,12 @@
 # Retail Intelligence AI (pilot: GlowBasket)
 
-An AI analyst for a beauty D2C brand. It joins three systems that name every product differently (website, billing, warehouse), checks the data, tells the owner what needs attention in rupees, tracks each recommendation through approval to outcome, and answers free-form questions through a tool-using agent.
+A platform of **role agents** for beauty D2C and retail brands: a Chief of staff, a Replenishment planner, a Margin controller and a Revenue assurance (finance) agent, all running on one shared engine, with a control tower over them. Each agent is a settings file that states the decisions it owns, the one number it is judged on, the numbers it must not damage, and how we prove its advice paid off. New agents, tools, KPIs and connectors plug in as files (see `docs/06_platform_modules.md`).
+
+Underneath, the data layer joins three systems that name every product differently (website, billing, warehouse), checks the data, tells the owner what needs attention in rupees, tracks each recommendation through approval to outcome, and answers free-form questions through a tool-using agent.
 
 Built on the standard five agent components (reasoning model, tools, memory, task manager, interface), all on Claude: Claude Sonnet 5.5 reasons and answers, Claude Haiku 5.5 routes unclear questions. See `docs/03_agent_design.md` for how each maps to the course.
 
-**Tested (42 automated tests):** data pipeline and revenue tie-out; detection of every planted problem; the agent's routing, concurrent / sequential / fallback patterns, budgets, caching, grounding check, memory, approvals; recommendation lifecycle; daily job; Claude API request format, prompt caching and cost (against fakes).
+**Tested (65 automated tests):** the plug-in structure (core never hard-wires a plug-in), agent catalog validity, data-contract readiness, role agents staying within their tools, role dashboards and control tower; data pipeline and revenue tie-out; detection of every planted problem; the agent's routing, concurrent / sequential / fallback patterns, budgets, caching, grounding check, memory, approvals; recommendation lifecycle; daily job; Claude API request format, prompt caching and cost (against fakes).
 **Not yet tested:** live calls to the Claude API (needs your API key), and the screen layout in a browser.
 **All data is synthetic.** It proves the logic, not that a real client's data will behave.
 
@@ -38,7 +40,8 @@ If `python` is not found, try `py` (Windows) or `python3` (Mac). If anything err
 |---|---|
 | `python -m retail_intel daily` | Refresh data, update findings and tasks, check outcomes, save the briefing to `data/briefings/` |
 | `python -m retail_intel brief` | Print today's briefing |
-| `python -m retail_intel chat` | Talk to the analyst; it remembers earlier turns |
+| `python -m retail_intel agents` | Which agents run for this client, and what data the others are missing |
+| `python -m retail_intel chat --agent replenishment` | Talk to one role agent (or leave out `--agent` for the general analyst) |
 | `python -m retail_intel recs` | Recommendations and their status |
 | `python -m retail_intel approve 3 "PO raised"` | Approve (also `reject`, `done`) |
 | `python -m retail_intel questions` / `answer ID "text"` | Questions for you, and your answers |
@@ -55,7 +58,10 @@ retail_intel/
   ingest/ reconcile/ core/ metrics/   data layer: raw copy -> master SKU + order matching + quality gate -> clean tables -> tested metrics
   findings.py briefing.py             what needs attention, in rupees, with a question and an action
   actions.py daily.py                 task manager: recommendation lifecycle; the daily job
-  agent/                              models (API client) | tools | memory | router (decision matrix) | orchestrator | grounding | prompts
+  platform/                           plug points (registry), catalog loader + readiness, connector plug, dashboards
+  catalog/                            agents/*.toml (role agents) | streams.toml (data contract) | clients/demo.toml
+  tools/ kpis/ connectors/            plug-ins: one file per area, picked up automatically
+  agent/                              models (API client) | toolbox runtime | memory | router (decision matrix) | orchestrator | grounding | prompts
   eval/                               30-question evaluation set and runner
 app/ tests/ docs/ data/ (generated; safe to delete, rebuilt by step 6)
 ```

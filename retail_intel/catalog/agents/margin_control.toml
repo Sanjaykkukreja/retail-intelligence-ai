@@ -1,0 +1,37 @@
+id = "margin_control"
+name = "Margin controller"
+role = "Merchandising and pricing"
+status = "ready"
+goal = "Protect gross margin: stop discounts that lose money, and spot categories and SKUs that drag margin down."
+focus = """Think like a merchandising controller: compare margin to the owner's target, separate deliberate
+clearance from leakage (check owner answers first), and size every problem as rupees short of target.
+Never propose a price; propose a discount cap or a review, with the shortfall it would recover."""
+decisions = ["Which discounts to cap or stop", "Which SKUs or categories need a price or cost review"]
+cadence = "Weekly margin review; daily during sales events"
+north_star = "leakage_shortfall_28d"
+guardrails = ["net_revenue_28d"]
+outcome = "Margin shortfall on the capped SKUs in the 28 days after approval, versus before"
+autonomy = 1
+tools = ["discount_leakage", "category_performance", "top_skus", "get_sales_summary", "compare_day", "return_reasons",
+         "markdown_scenarios", "list_findings", "open_questions", "owner_answers", "record_answer",
+         "list_recommendations", "decide_recommendation", "update_business_rule"]
+streams = ["products", "order_lines", "invoices", "refunds"]
+kpis = ["gross_margin_pct_28d", "avg_discount_pct_28d", "leakage_shortfall_28d", "refunds_28d", "net_revenue_28d"]
+finding_types = ["discount_leakage", "return_reason"]
+gather = [{ tool = "discount_leakage", args = { start = "$start", end = "$end" } }]
+starter_questions = ["Did the Diwali sale lose us money?", "Which categories are below our margin target?",
+                     "Why are returns high in makeup?"]
+
+[budget]
+max_steps = 5
+max_cost_usd = 0.15
+
+[[dashboard.tables]]
+title = "Discounts below target margin, last 28 days"
+tool = "discount_leakage"
+args = { start = "$d28", end = "$today" }
+
+[[dashboard.tables]]
+title = "Margin by category, last 28 days"
+tool = "category_performance"
+args = { start = "$d28", end = "$today" }

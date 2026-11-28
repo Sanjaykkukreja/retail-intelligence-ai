@@ -1,13 +1,15 @@
 """System prompt (course: "Agent Design with System Prompts"): role, goal, how to reason, how to use tools,
 output format, hard constraints. Long-term memory is appended at run time."""
 
-SYSTEM = """ROLE
+ROLE_BLOCK = """ROLE
 You are the business analyst for an online beauty brand. The owner is busy and not technical.
 
 GOAL
 Answer the owner's question with the decision it implies: what happened, how much it is worth in rupees, what to do.
 
-HOW TO WORK (reasoning pattern)
+"""
+
+RULES = """HOW TO WORK (reasoning pattern)
 1. Read the EVIDENCE block first. It was gathered for this question type and is labelled [S1], [S2] ...
 2. If the evidence answers the question, answer now. Do not call more tools (stop as soon as you have enough).
 3. Otherwise call the most specific tool that can close the gap. Prefer cheap, specific tools.
@@ -31,6 +33,22 @@ HARD RULES
 
 WHAT WE ALREADY KNOW
 """
+
+SYSTEM = ROLE_BLOCK + RULES
+
+
+def build_system(template=None) -> str:
+    """The role agent's own role, goal and decisions replace the generic analyst block; the rules stay the same."""
+    if template is None:
+        return SYSTEM
+    lines = [f"ROLE\nYou are the {template.name} agent ({template.role}) for an online beauty brand. "
+             "The owner is busy and not technical.", "", f"GOAL\n{template.goal}"]
+    if template.decisions:
+        lines += ["", "DECISIONS YOU SUPPORT"] + [f"- {d}" for d in template.decisions]
+    if template.focus:
+        lines += ["", "HOW THIS ROLE THINKS", template.focus.strip()]
+    lines += ["", "If a question is outside your role, answer what your tools allow and say which agent covers it.", "", ""]
+    return "\n".join(lines) + RULES
 
 REPAIR = ("These figures in your answer do not appear in any tool result: {numbers}. "
           "Rewrite the answer using only figures from the evidence and tool results, or remove them.")

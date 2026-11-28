@@ -12,6 +12,7 @@
 6. **Findings and briefing**: detectors turn metrics into a finding with rupee impact, a question for the owner, and an action. No AI needed.
 7. **Agent** (`agent/`): one tool-using agent on the Claude Messages API: Sonnet 5.5 answers, Haiku 5.5 routes. It never calculates; see `03_agent_design.md`.
 8. **Task manager** (`actions.py`, `daily.py`): recommendation lifecycle and the daily run.
+9. **Platform** (`platform/`, `catalog/`): role agents as settings files on one engine; plug points for tools, KPIs and connectors; the data contract (streams); readiness checks; role dashboards and the control tower. See `06_platform_modules.md`.
 
 ## Decisions and why
 | Decision | Reason |
@@ -22,6 +23,9 @@
 | No web API layer, no own MCP servers in V1 | Nothing needs them yet. Tools are plain functions, so they can be wrapped later. |
 | Gross margin, not "contribution margin" | We do not have shipping, payment fees or marketing cost, so the label would overclaim. |
 | Raw layer is never edited | Any disputed number can be traced to the client's own file. |
+| Modular application, not separate services | Plug points give the flexibility; one deployable keeps it maintainable by one person. The sync worker is the first candidate to split out. |
+| Agents are configuration (TOML), not code | 20 or 100 agents stay maintainable: one engine, one toolbox, one eval harness. TOML needs no extra library. |
+| Agents designed around decisions, judged on a north star with guardrails | Outcomes, not activity: every agent shows whether its advice was accepted and whether the problem went away. |
 | All AI on Claude, behind one adapter interface (`agent/models.py`) | One provider, one key, one bill. The interface still lets a model be swapped (Haiku, Sonnet, Opus) by changing one setting, chosen by the 30-question eval. |
 
 ## Known simplifications

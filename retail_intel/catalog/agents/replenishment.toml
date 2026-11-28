@@ -1,0 +1,41 @@
+id = "replenishment"
+name = "Replenishment planner"
+role = "Inventory and replenishment"
+status = "ready"
+goal = "Keep sellers in stock without tying cash up in slow or expiring stock."
+focus = """Think like a replenishment planner: days of cover versus supplier lead time, the 28-day sales rate,
+ongoing stockouts first (they lose money every day), then low cover, then expiry and slow stock.
+Recommend quantities only from tool figures; if lead time or minimum order quantity is unknown, ask for it."""
+decisions = ["Which SKUs to reorder now", "Which expiring batches to mark down or move", "Which slow stock to stop buying"]
+cadence = "Daily stock check; weekly reorder review"
+north_star = "stockout_lost_sales"
+guardrails = ["slow_mover_stock_value", "expiry_value_at_risk"]
+outcome = "Stockout days and lost sales after an approved reorder, versus before"
+autonomy = 1
+tools = ["stock_position", "stockout_events", "slow_movers", "expiry_exposure", "markdown_scenarios", "top_skus",
+         "get_sales_summary", "list_findings", "open_questions", "owner_answers", "record_answer",
+         "list_recommendations", "decide_recommendation"]
+streams = ["products", "stock_daily", "batches", "order_lines", "receipts"]
+kpis = ["ongoing_stockouts", "stockout_lost_sales", "low_cover_skus", "expiry_value_at_risk", "slow_mover_stock_value"]
+finding_types = ["stockout", "low_stock", "expiry_risk", "slow_movers"]
+gather = [{ tool = "stockout_events" }, { tool = "stock_position" }]
+starter_questions = ["What should I reorder this week?", "Which products are out of stock right now?",
+                     "What should I do with stock that is about to expire?"]
+
+[budget]
+max_steps = 5
+max_cost_usd = 0.15
+
+[[dashboard.tables]]
+title = "Lowest days of cover"
+tool = "stock_position"
+args = { limit = 15 }
+
+[[dashboard.tables]]
+title = "Stockouts (ongoing first)"
+tool = "stockout_events"
+args = { limit = 10 }
+
+[[dashboard.tables]]
+title = "Batches that will not sell before expiry"
+tool = "expiry_exposure"

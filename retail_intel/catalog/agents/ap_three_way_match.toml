@@ -1,0 +1,12 @@
+id = "ap_three_way_match"
+name = "Bills and PO matcher"
+role = "Finance and controller"
+status = "planned"
+goal = "Check every vendor bill against the purchase order and what the warehouse actually received before it is paid."
+focus = "Match bill lines to PO lines and goods received; flag short supply, price creep, duplicate bills and GSTIN mismatches."
+decisions = ["Which bills are safe to pay", "Which bills to hold and query with the vendor"]
+cadence = "Daily as bills arrive"
+outcome = "Rupees of overbilling caught before payment"
+autonomy = 2
+streams = ["purchase_orders", "bills", "receipts", "vendor_payments"]
+finding_types = ["bill_mismatch"]

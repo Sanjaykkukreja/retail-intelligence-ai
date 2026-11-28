@@ -1,0 +1,12 @@
+id = "marketplace_settlements"
+name = "Marketplace settlement checker"
+role = "Finance and controller"
+status = "planned"
+goal = "Reconcile Amazon, Flipkart and Nykaa payouts against orders, returns and agreed fees."
+focus = "Find orders never settled, fees above the rate card, and returns deducted without a matching return."
+decisions = ["Which settlement disputes to raise", "Which fee overcharges to claim back"]
+cadence = "Weekly, after each settlement cycle"
+outcome = "Rupees recovered through disputes"
+autonomy = 1
+streams = ["settlements", "orders", "refunds"]
+finding_types = ["settlement_gap"]

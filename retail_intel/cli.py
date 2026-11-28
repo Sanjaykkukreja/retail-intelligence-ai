@@ -13,9 +13,10 @@ Owner
   approve ID [note]        approve a recommendation          reject ID [note]   reject it
   done ID [note]           mark an approved recommendation as done
   review-queue             product matches that need a human decision
-AI analyst (needs ANTHROPIC_API_KEY; see README step 9)
-  ask "QUESTION"           one question
-  chat                     a conversation that remembers earlier turns (type 'exit' to stop)
+Agents (need ANTHROPIC_API_KEY; see README step 9)
+  agents                   the agent catalog: which agents run for this client and what data they need
+  ask "QUESTION"           one question (add --agent ID to ask a role agent, e.g. --agent replenishment)
+  chat                     a conversation that remembers earlier turns (type 'exit' to stop; --agent works here too)
   eval                     score the agent on 30 test questions (routing only if no API key)
 """
 from __future__ import annotations
@@ -28,12 +29,19 @@ from . import db
 from .config import DB_PATH, SOURCE_DIR, TRUTH_DIR
 
 COMMANDS = ["generate", "pipeline", "daily", "all", "brief", "questions", "answer", "recs", "approve", "reject", "done",
-            "review-queue", "ask", "chat", "eval"]
+            "review-queue", "agents", "ask", "chat", "eval"]
 
 
-def _agent():
+def _agent(agent_id: str | None = None):
     from .agent.orchestrator import Agent
-    agent = Agent.from_env(DB_PATH)
+    template = None
+    if agent_id:
+        from .platform.catalog import active_agents
+        found = {t.id: t for t in active_agents()}
+        if agent_id not in found:
+            raise SystemExit(f"agent '{agent_id}' is not active. Active: {', '.join(found)}")
+        template = found[agent_id]
+    agent = Agent.from_env(DB_PATH, template=template)
     if agent.model is None:
         print("(No ANTHROPIC_API_KEY set: the analyst will show the evidence it gathered instead of a written answer.)\n")
     return agent
@@ -52,6 +60,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="retail_intel", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=COMMANDS)
     ap.add_argument("args", nargs="*")
+    ap.add_argument("--agent", default=None, help="role agent id for ask/chat (see: agents)")
     ns = ap.parse_args(argv)
     pd.set_option("display.width", 200)
     pd.set_option("display.max_colwidth", 90)
@@ -100,10 +109,18 @@ def main(argv=None) -> int:
         from .reconcile.sku_mapping import review_queue
         q = review_queue(db.connect(DB_PATH))
         print(q.to_string(index=False) if len(q) else "Nothing waiting. All SKU mappings are accepted.")
+    if ns.command == "agents":
+        from .platform.catalog import load_client, load_templates, readiness
+        client = load_client()
+        print(f"Client: {client.name}   connectors: {', '.join(client.connectors)}\n")
+        for t in load_templates().values():
+            r = readiness(t, client)
+            state = "RUNS" if r["ready"] and r["enabled"] else "off " if r["ready"] else "--  "
+            print(f"{state} {t.id:24s} {t.name:30s} {t.autonomy_label:22s} {r['reason']}")
     if ns.command == "ask":
-        _print_result(_agent().ask(" ".join(a)))
+        _print_result(_agent(ns.agent).ask(" ".join(a)))
     if ns.command == "chat":
-        agent, session = _agent(), None
+        agent, session = _agent(ns.agent), None
         while True:
             try:
                 q = input("\nYou: ").strip()
@@ -113,7 +130,7 @@ def main(argv=None) -> int:
                 break
             r = agent.ask(q, session)
             session = r.session_id
-            print("\nAnalyst:"); _print_result(r)
+            print(f"\n{agent.template.name if agent.template else 'Analyst'}:"); _print_result(r)
     if ns.command == "eval":
         from .agent.models import make_model
         from .eval.run_eval import run_eval

@@ -22,12 +22,18 @@ from retail_intel.findings import answer_question
 from retail_intel.metrics import funnel_fulfilment as ff
 from retail_intel.metrics import inventory, sales
 from retail_intel.metrics.common import as_of, context, shift
+from retail_intel.agent.tools import Toolbox
+from retail_intel.platform.catalog import (active_agents, available_streams, load_client, load_streams, load_templates,
+                                           readiness, validate)
+from retail_intel.platform.dashboards import agent_dashboard, control_tower, fmt_value
+from retail_intel.platform.registry import CONNECTORS, load_plugins
 
 st.set_page_config(page_title="Retail Intelligence AI", layout="wide")
 
 # Cloud hosting: keys pasted into Streamlit's "Secrets" box become environment variables for the agent.
 try:
-    for _k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_ROUTER_MODEL", "AGENT_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL"):
+    for _k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_ROUTER_MODEL", "AGENT_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL",
+               "CLIENT_CONFIG_TOML"):
         if _k in st.secrets and not os.environ.get(_k):
             os.environ[_k] = str(st.secrets[_k])
 except Exception:  # no secrets configured (e.g. on a laptop) - fine
@@ -59,34 +65,176 @@ def cached_briefing(version: str) -> dict:
 
 
 version = conn.execute("select max(run_at) from pipeline_runs").fetchone()[0] if db.table_exists(conn, "pipeline_runs") else "0"
-st.sidebar.title("GlowBasket")
-st.sidebar.caption(f"Data through {today}")
-page = st.sidebar.radio("Go to", ["Ask the analyst", "Daily briefing", "Recommendations", "Findings and questions",
-                                  "Trends", "Stock and expiry", "Data health", "Agent activity"])
+load_plugins()
+client = load_client()
+templates = load_templates()
+agents = active_agents(client, templates)
+by_id = {a.id: a for a in agents}
 
-if page == "Ask the analyst":
-    st.header("Ask the analyst")
+PAGES = ["Control tower", "Ask an agent", "Role dashboards", "Agent catalog", "Recommendations", "Daily briefing",
+         "Findings and questions", "Trends", "Stock and expiry", "Data health", "Agent activity"]
+if "page" not in st.session_state:
+    st.session_state.page = PAGES[0]
+if st.session_state.get("dash_agent") not in by_id:
+    st.session_state.dash_agent = agents[0].id
+if st.session_state.get("ask_agent") not in by_id:
+    st.session_state.ask_agent = client.default_agent if client.default_agent in by_id else agents[0].id
+
+
+def go(page: str, agent_id: str | None = None, key: str = "dash_agent"):
+    st.session_state.page = page
+    if agent_id:
+        st.session_state[key] = agent_id
+
+
+st.sidebar.title(client.name)
+st.sidebar.caption(f"Data through {today} | {len(agents)} agents active")
+page = st.sidebar.radio("Go to", PAGES, key="page")
+
+
+def show_kpi(col, k, help_text=None):
+    col.metric(k["label"], k["text"], help=help_text or (k["error"] or None))
+
+
+def rec_list(recs: pd.DataFrame, key_prefix: str):
+    """Approve / reject / done buttons for a set of recommendations."""
+    if recs.empty:
+        st.write("Nothing here.")
+    for _, r in recs.iterrows():
+        impact = f" - about {fmt_value(r['est_impact_inr'], 'inr')}" if pd.notna(r["est_impact_inr"]) else ""
+        owner = f" ({by_id[r['agent']].name})" if "agent" in r and r.get("agent") in by_id else ""
+        with st.expander(f"#{r['id']} [{r['severity'].upper()}] {r['title']}{impact}{owner}"):
+            st.write(f"**Suggested action:** {r['action']}")
+            if r.get("decision_note"):
+                st.write(f"**Your note:** {r['decision_note']}")
+            if r.get("outcome_note"):
+                st.info(f"Outcome: {r['outcome_note']}")
+            note = st.text_input("Note (optional)", key=f"{key_prefix}n{r['id']}")
+            c1, c2, c3 = st.columns(3)
+            if r["status"] == "proposed" and c1.button("Approve", key=f"{key_prefix}a{r['id']}"):
+                decide(conn, int(r["id"]), True, note); st.rerun()
+            if r["status"] == "proposed" and c2.button("Reject", key=f"{key_prefix}r{r['id']}"):
+                decide(conn, int(r["id"]), False, note); st.rerun()
+            if r["status"] == "approved" and c3.button("Mark done", key=f"{key_prefix}d{r['id']}"):
+                mark_done(conn, int(r["id"]), note); st.rerun()
+
+
+if page == "Control tower":
+    st.header("Control tower")
+    st.caption("The whole business on one page: headline numbers, then each agent's north-star number and the decisions it is waiting on.")
+    ct = control_tower(conn, agents)
+    cols = st.columns(len(ct["kpis"]) + 1)
+    for c, k in zip(cols, ct["kpis"]):
+        show_kpi(c, k)
+    cols[-1].metric("AI spend so far", f"${ct['ai_cost_usd']:.2f}")
+    st.subheader("Agents")
+    for i in range(0, len(agents), 2):
+        row = st.columns(2)
+        for col, (_, a) in zip(row, ct["agents"].iloc[i:i + 2].iterrows()):
+            with col.container(border=True):
+                st.markdown(f"**{a['agent']}**  \n{a['role']} | {a['autonomy']}")
+                c1, c2 = st.columns(2)
+                c1.metric(a["north_star"], a["north_star_value"])
+                c2.metric("Decisions waiting", int(a["decisions_waiting"]),
+                          help=f"Worth about {fmt_value(a['rupees_waiting'], 'inr')}")
+                acc = "no decisions yet" if pd.isna(a["acceptance_pct"]) else f"{a['acceptance_pct']:.0f}% of its advice accepted"
+                st.caption(f"{acc} | {int(a['questions'])} questions | AI ${a['ai_cost_usd']:.2f}")
+                b1, b2 = st.columns(2)
+                b1.button("Open dashboard", key=f"ct_d_{a['agent_id']}", on_click=go, args=("Role dashboards", a["agent_id"]))
+                b2.button("Ask this agent", key=f"ct_a_{a['agent_id']}", on_click=go,
+                          args=("Ask an agent", a["agent_id"], "ask_agent"))
+    st.subheader("Decisions waiting, biggest first")
+    w = ct["waiting"].assign(agent=lambda d: d["agent"].map(lambda x: by_id[x].name if x in by_id else "-"))
+    st.dataframe(w[["id", "agent", "severity", "title", "est_impact_inr"]].rename(columns={"est_impact_inr": "impact_rs"}),
+                 use_container_width=True, hide_index=True)
+
+elif page == "Role dashboards":
+    t = by_id[st.selectbox("Agent", list(by_id), key="dash_agent", format_func=lambda x: by_id[x].name)]
+    d = agent_dashboard(conn, t, agents, Toolbox(DB_PATH))
+    st.header(t.name)
+    st.caption(f"{t.role} | {t.autonomy_label} | {t.cadence}")
+    st.write(t.goal)
+    top = st.columns(1 + len(d["guardrails"]))
+    if d["north_star"]:
+        show_kpi(top[0], d["north_star"], "North star: the number this agent is judged on")
+    for c, k in zip(top[1:], d["guardrails"]):
+        show_kpi(c, k, "Guardrail: must not get worse while the north star improves")
+    if d["kpis"]:
+        for c, k in zip(st.columns(len(d["kpis"])), d["kpis"]):
+            show_kpi(c, k)
+    with st.expander("What this agent decides and how it is judged"):
+        st.markdown("**Decisions it supports**\n" + "\n".join(f"- {x}" for x in t.decisions))
+        st.markdown(f"**How we prove it worked:** {t.outcome}")
+    sc = d["scorecard"]
+    st.subheader("Its recommendations")
+    c = st.columns(5)
+    c[0].metric("Waiting", sc["proposed"], help=f"Worth about {fmt_value(sc['rupees_waiting'], 'inr')}")
+    c[1].metric("Approved", sc["approved"]); c[2].metric("Done", sc["done"]); c[3].metric("Rejected", sc["rejected"])
+    c[4].metric("Advice accepted", "-" if sc["acceptance_pct"] is None else f"{sc['acceptance_pct']:.0f}%")
+    rec_list(d["recommendations"][d["recommendations"]["status"].isin(["proposed", "approved"])], f"rd_{t.id}_")
+    for tb in d["tables"]:
+        st.subheader(tb["title"])
+        if tb["error"]:
+            st.error(tb["error"])
+        else:
+            st.dataframe(tb["rows"], use_container_width=True, hide_index=True)
+    act = d["activity"]
+    st.caption(f"{act['questions']} questions asked | AI ${act['cost_usd']:.2f}"
+               + ("" if act["grounded_pct"] is None else f" | {act['grounded_pct']:.0f}% of answers fully traced to data"))
+    st.button(f"Ask {t.name}", on_click=go, args=("Ask an agent", t.id, "ask_agent"))
+
+elif page == "Agent catalog":
+    st.header("Agent catalog")
+    st.caption("Every role agent the platform offers. An agent runs only when it is built, switched on for this "
+               "client, and every data stream it needs is connected.")
+    have = available_streams(client)
+    rows = []
+    for t in templates.values():
+        rd = readiness(t, client)
+        rows.append(dict(agent=t.name, role=t.role, built=t.status, switched_on=rd["enabled"], runs=rd["ready"] and rd["enabled"],
+                         why=rd["reason"], autonomy=t.autonomy_label, judged_on=t.north_star or "-",
+                         problems="; ".join(validate(t)) or "-"))
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.subheader("Data contract: which data each agent needs")
+    streams = load_streams()
+    matrix = pd.DataFrame([{"stream": s.label, "connected": "yes" if k in have else "no",
+                            **{t.name: ("needs" if k in t.streams else "") for t in templates.values()}}
+                           for k, s in streams.items()])
+    st.dataframe(matrix, use_container_width=True, hide_index=True)
+    st.subheader("Connectors")
+    st.dataframe(pd.DataFrame([dict(connector=c.label, status=c.status, in_use=name in client.connectors,
+                                    streams=", ".join(c.streams), settings=c.settings_help)
+                               for name, c in CONNECTORS.items()]), use_container_width=True, hide_index=True)
+
+elif page == "Ask an agent":
+    t = by_id[st.selectbox("Talk to", list(by_id), key="ask_agent", format_func=lambda x: f"{by_id[x].name} ({by_id[x].role})")]
+    st.header(t.name)
+    st.caption(t.goal)
     model = make_model("answer")
     if model is None:
-        st.info("No ANTHROPIC_API_KEY found, so answers show the evidence the analyst gathered instead of a written reply. "
+        st.info("No ANTHROPIC_API_KEY found, so answers show the evidence the agent gathered instead of a written reply. "
                 "See the build guide, section 4, to add your Claude API key.")
-    if "chat" not in st.session_state:
-        st.session_state.chat, st.session_state.session_id = [], None
+    if st.session_state.get("chat_agent") != t.id:                     # each agent keeps its own conversation
+        st.session_state.chat, st.session_state.session_id, st.session_state.chat_agent = [], None, t.id
     for role, text in st.session_state.chat:
         with st.chat_message(role):
             st.markdown(text)
-    q = st.chat_input("e.g. Why did cancellations jump in mid-September?")
+    q = st.chat_input(f"Ask the {t.name}...")
+    if not st.session_state.chat and t.starter_questions:
+        for c, sq in zip(st.columns(len(t.starter_questions)), t.starter_questions):
+            if c.button(sq, key=f"sq_{t.id}_{sq}"):
+                q = sq
     if q:
         st.session_state.chat.append(("user", q))
         with st.chat_message("user"):
             st.markdown(q)
         with st.chat_message("assistant"):
             with st.spinner("Checking the data..."):
-                r = Agent.from_env(DB_PATH).ask(q, st.session_state.session_id)
+                r = Agent.from_env(DB_PATH, template=t).ask(q, st.session_state.session_id)
             st.session_state.session_id = r.session_id
             st.markdown(r.answer)
             cost = f" | about ${r.cost_usd:.4f}" if r.cost_usd is not None else ""
-            st.caption(f"{r.intent} | {r.pattern} | tools: {', '.join(r.tools_used) or 'none'} | "
+            st.caption(f"{r.agent} | {r.intent} | {r.pattern} | tools: {', '.join(r.tools_used) or 'none'} | "
                        f"{r.usage.total_input_tokens + r.usage.output_tokens} tokens ({r.usage.cache_read_tokens} from cache){cost} | {r.latency_s}s")
             if r.grounded is False:
                 st.warning("Some figures could not be traced to the data. Check them before acting.")
@@ -103,25 +251,10 @@ elif page == "Recommendations":
     if st.button("Check outcomes of approved actions"):
         check_outcomes(conn)
     status = st.selectbox("Show", ["proposed", "approved", "done", "rejected", "expired", "all"])
-    recs = list_recommendations(conn, None if status == "all" else status)
-    if recs.empty:
-        st.write("Nothing here.")
-    for _, r in recs.iterrows():
-        impact = f" - about Rs {r['est_impact_inr']:,.0f}" if pd.notna(r["est_impact_inr"]) else ""
-        with st.expander(f"#{r['id']} [{r['severity'].upper()}] {r['title']}{impact}"):
-            st.write(f"**Suggested action:** {r['action']}")
-            if r["decision_note"]:
-                st.write(f"**Your note:** {r['decision_note']}")
-            if r["outcome_note"]:
-                st.info(f"Outcome: {r['outcome_note']}")
-            note = st.text_input("Note (optional)", key=f"n{r['id']}")
-            c1, c2, c3 = st.columns(3)
-            if r["status"] == "proposed" and c1.button("Approve", key=f"a{r['id']}"):
-                decide(conn, int(r["id"]), True, note); st.rerun()
-            if r["status"] == "proposed" and c2.button("Reject", key=f"r{r['id']}"):
-                decide(conn, int(r["id"]), False, note); st.rerun()
-            if r["status"] == "approved" and c3.button("Mark done", key=f"d{r['id']}"):
-                mark_done(conn, int(r["id"]), note); st.rerun()
+    from retail_intel.platform.dashboards import recommendations_by_agent
+    allr = recommendations_by_agent(conn, agents)
+    full = list_recommendations(conn, None if status == "all" else status).merge(allr[["id", "agent"]], on="id", how="left")
+    rec_list(full, "rp_")
 
 elif page == "Findings and questions":
     st.header("What the system found")
@@ -191,10 +324,12 @@ elif page == "Data health":
 
 else:
     st.header("Agent activity")
+    st.caption("Every question, which agent answered it, what it cost.")
     if not db.table_exists(conn, "agent_runs"):
         st.write("No questions asked yet.")
     else:
-        runs = db.read(conn, "select ts, question, intent, pattern, model, input_tokens, output_tokens, model_calls, cost_usd, "
+        _cols = [r[1] for r in conn.execute("pragma table_info(agent_runs)")]
+        runs = db.read(conn, "select ts, " + ("agent, " if "agent" in _cols else "") + "question, intent, pattern, model, input_tokens, output_tokens, model_calls, cost_usd, "
                              "grounded, stopped, latency_s from agent_runs order by ts desc limit 200")
         c1, c2, c3 = st.columns(3)
         c1.metric("Questions", len(runs))

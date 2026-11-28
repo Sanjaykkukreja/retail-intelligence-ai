@@ -12,17 +12,21 @@ import pandas as pd
 from . import db
 from .config import DB_PATH, OVERRIDES_PATH, SOURCE_DIR
 from .core.build_core import build_core, check_core_reconciles
-from .ingest.load_raw import load_raw
+from .platform.registry import CONNECTORS, load_plugins
 from .reconcile.order_matching import build_order_xref
 from .reconcile.quality import blockers, run_checks
 from .reconcile.sku_mapping import build_sku_map
 
 
 def run_pipeline(source_dir: str | Path = SOURCE_DIR, db_path: str | Path = DB_PATH,
-                 overrides_path: str | Path | None = OVERRIDES_PATH, with_findings: bool = True) -> dict:
+                 overrides_path: str | Path | None = OVERRIDES_PATH, with_findings: bool = True,
+                 connector: str = "csv_files") -> dict:
+    """connector: which registered connector pulls the data (from the client's setup). The pipeline never
+    imports a specific connector; it asks the registry."""
+    load_plugins()
     conn = db.connect(db_path)
     result: dict = {"status": "ok", "steps": {}}
-    result["steps"]["ingest"] = load_raw(conn, source_dir)
+    result["steps"]["ingest"] = CONNECTORS.get(connector)().sync(conn, {"source_dir": str(source_dir)})
     sku_map = build_sku_map(conn, overrides_path)
     result["steps"]["sku_map"] = sku_map["status"].value_counts().to_dict()
     build_order_xref(conn)
