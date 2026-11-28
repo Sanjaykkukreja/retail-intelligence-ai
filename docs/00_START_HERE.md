@@ -2,11 +2,11 @@
 
 Consulting-first AI analyst for beauty D2C brands, built entirely on Claude. Pilot business: GlowBasket (synthetic data from three messy systems: website, billing, warehouse).
 
-## Status (25 Nov 2026)
-- Phase 1 (data layer) and phase 2 (agent on the five course components) are done: 42 automated tests pass.
-- All AI runs on Claude: Claude Sonnet 5.5 answers, Claude Haiku 5.5 classifies unclear questions, prompt caching cuts repeat cost. One key: `ANTHROPIC_API_KEY`.
-- Phase 3 is next: put the app live on Streamlit Community Cloud from GitHub.
-- Not yet tested: live Claude API calls (needs your key) and the screen layout in a browser.
+## Status (28 Nov 2026)
+- Live on Streamlit Community Cloud with Claude (Sonnet 5.5 answers, Haiku 5.5 routes).
+- Platform step 1 done: four role agents (Chief of staff, Replenishment planner, Margin controller, Revenue assurance) on one engine, plus two planned finance agents; control tower, role dashboards, agent catalog. 65 automated tests pass.
+- Next: Supabase so conversations, approvals and spend survive a redeploy; then the Zoho Books connector.
+- Not yet checked: the new screens in a real browser (they run against a stand-in in tests).
 
 ## Where everything lives
 | What | Where |
@@ -23,7 +23,7 @@ Older copies in the Drive folder (`retail-intelligence-ai.zip`, `03_agent_design
 
 ## How a build session starts
 1. Open the chat inside this project, with the SMB Automation folder connected in the Claude desktop app. Claude reads the code from the folder directly; no zip upload needed. Without the folder, attach the latest zip.
-2. Claude runs the 42 tests and confirms the state before changing anything.
+2. Claude runs the tests (65 today) and confirms the state before changing anything.
 3. One goal per session; close with all tests passing and one CHANGELOG row.
 
 ## Locked rules (full list in the guide)
