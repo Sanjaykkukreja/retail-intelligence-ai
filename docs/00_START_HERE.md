@@ -7,6 +7,7 @@ Consulting-first AI analyst for beauty D2C brands, built entirely on Claude. Pil
 - Platform step 1 done: four role agents (Chief of staff, Replenishment planner, Margin controller, Revenue assurance) on one engine, plus two planned finance agents; control tower, role dashboards, agent catalog. 65 automated tests pass.
 - Permanent history (Supabase) is built and tested; it switches on when `SUPABASE_DB_URL` is in Streamlit Secrets.
 - Question library: 24 families (`docs/08_question_library.md`); every certified example question is routed correctly. 77 tests pass.
+- Demo polish done: 7 pages in 3 groups, own logo and look. App pages: Control tower, Ask an agent, Role dashboards, Decisions, Trends and stock, Agents and data, Usage and history.
 - Next: actions v1 (email and hand-off with approvals), then the Zoho Books connector.
 - Not yet checked: the new screens in a real browser (they run against a stand-in in tests).
 
@@ -28,7 +29,7 @@ Older copies in the Drive folder (`retail-intelligence-ai.zip`, `03_agent_design
 
 ## How a build session starts
 1. Open the chat inside this project, with the SMB Automation folder connected in the Claude desktop app. Claude reads the code from the folder directly; no zip upload needed. Without the folder, attach the latest zip.
-2. Claude runs the tests (77 today) and confirms the state before changing anything.
+2. Claude runs the tests (78 today) and confirms the state before changing anything.
 3. One goal per session; close with all tests passing and one CHANGELOG row.
 
 ## Locked rules (full list in the guide)

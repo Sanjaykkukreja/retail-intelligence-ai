@@ -1,6 +1,7 @@
 """Central settings. Change numbers here, not inside the code."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 SOURCE_DIR = DATA_DIR / "source"      # the three "client systems" (CSV exports)
 TRUTH_DIR = DATA_DIR / "truth"        # what the generator planted (used by tests only)
-DB_PATH = DATA_DIR / "glowbasket.db"
+DB_PATH = Path(os.environ.get("RI_DB_PATH") or DATA_DIR / "glowbasket.db")   # RI_DB_PATH: tests point the app at a copy
 OVERRIDES_PATH = DATA_DIR / "sku_map_overrides.csv"   # human-approved SKU mappings
 
 # Default business rules. They live in the business_context table so the

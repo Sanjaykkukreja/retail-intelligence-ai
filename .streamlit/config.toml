@@ -1,0 +1,11 @@
+# Look and feel. Secrets never go in this file (they live in Streamlit Cloud -> Settings -> Secrets).
+[theme]
+base = "light"
+primaryColor = "#1F6F5C"
+backgroundColor = "#FAFAF8"
+secondaryBackgroundColor = "#F2F1ED"
+textColor = "#1A1A18"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
