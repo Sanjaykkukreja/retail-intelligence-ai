@@ -13,6 +13,7 @@ Consulting-first AI analyst for beauty D2C brands, built entirely on Claude. Pil
 |---|---|
 | Code (latest is GitHub; Drive copy is from 27 Nov) | Google Drive: `G:\My Drive\AI projects\SMB Automation\retail-intelligence-ai` |
 | Code (zip) | Same folder: `retail-intelligence-ai-2026-11-25-UNZIP-ME.zip` |
+| Live app (Streamlit; anyone with the link can use it until a password is added) | https://retail-intelligence-ai-mtf3t4kwzzd3l57fpbaappn.streamlit.app/ |
 | Code on GitHub (public; deploys to Streamlit from here) | https://github.com/Sanjaykkukreja/retail-intelligence-ai |
 | Build and deploy guide (step by step, phone-friendly) | Claude Doc: https://claude.ai/artifact/7Cr1BkiX2gR5BAQ1ptd6xk |
 | Design docs, README, changelog, sample briefing | This project |
