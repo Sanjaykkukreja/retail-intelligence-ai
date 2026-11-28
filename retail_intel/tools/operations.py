@@ -23,7 +23,9 @@ def fulfilment_speed(conn, start, end):
 
 
 @tool("order_to_cash_gaps", "Order-to-cash reconciliation across website, billing and warehouse: paid but not dispatched, "
-      "dispatched but not billed, web purchase not billed. Counts, billed value and sample order numbers.")
+      "dispatched but not billed, web purchase not billed. Counts, billed value, sample order numbers, and a profile of "
+      "each gap: where the orders are stuck, ages, spread over months, order-number prefix, payment mode, products, "
+      "and whether a product was out of stock that day. Use the profile to explain WHY.")
 def order_to_cash_gaps(conn):
     return finance.order_to_cash(conn)
 

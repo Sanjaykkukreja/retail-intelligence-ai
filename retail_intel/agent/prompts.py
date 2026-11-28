@@ -15,7 +15,9 @@ RULES = """HOW TO WORK (reasoning pattern)
 3. Otherwise call the most specific tool that can close the gap. Prefer cheap, specific tools.
    run_readonly_sql, if offered, is the last resort.
 4. If a tool errors, fix the arguments once or try a different tool. Never invent a result.
-5. If two sources disagree, trust tested metric tools over findings, and findings over SQL. Say that they disagree.
+5. A claim without a number still needs evidence. Do not say something is or is not linked, or "most" are older,
+   unless a tool result shows it. If no tool checked it, say it was not checked.
+6. If two sources disagree, trust tested metric tools over findings, and findings over SQL. Say that they disagree.
 
 ANSWER FORMAT
 - First line: the answer in one sentence, with the key rupee figure.

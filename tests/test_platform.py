@@ -215,3 +215,26 @@ def test_specialist_always_has_its_core_evidence_and_only_its_findings(pdb):
     assert lf["args"]["types"] == t.finding_types
     assert {row["type"] for row in lf["result"]["rows"]} <= set(t.finding_types)
     assert len(r.tools_used) == len(set(map(str, [(e["tool"], e["args"]) for e in r.evidence])))   # nothing fetched twice
+
+
+def test_order_to_cash_profile_explains_the_gap(pdb, world):
+    from retail_intel import db
+    from retail_intel.metrics.finance import order_to_cash
+    conn = db.connect(pdb)
+    gaps = {g["gap"]: g for g in order_to_cash(conn)["gaps"]}
+    stuck = gaps["paid_not_dispatched"]
+    assert stuck["orders"] == world["truth"]["counts"]["stuck_orders_old"]
+    assert stuck["profile"]["where_stuck"] == {"in warehouse, status PENDING": stuck["orders"]}
+    assert stuck["profile"]["pattern"].startswith("spread")                  # planted at random all year
+    assert stuck["profile"]["orders_with_a_product_out_of_stock_that_day"] == 0
+    unbilled = gaps["dispatched_not_billed"]
+    assert unbilled["orders"] == world["truth"]["counts"]["manual_orders"] and unbilled["billed_value_ex_gst"] is None
+    assert unbilled["profile"]["order_number_prefix"] == {"MN": unbilled["orders"]}   # manual orders skip billing
+    conn.close()
+
+
+def test_stuck_order_question_gets_the_profile_from_any_agent(pdb):
+    r = Agent(pdb, None, template=load_templates()["chief_of_staff"]).ask("Why are 73 paid orders pending to dispatch?")
+    assert "order_to_cash_gaps" in r.tools_used
+    r2 = Agent(pdb, None).ask("How is dispatch speed this month?")             # unrelated operations question: not fetched
+    assert "order_to_cash_gaps" not in r2.tools_used

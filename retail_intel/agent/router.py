@@ -229,6 +229,11 @@ def _prior(c: Ctx) -> dict:
     return dict(start=_iso(s - timedelta(days=n)), end=_iso(s - timedelta(days=1)))
 
 
+# Questions about orders falling between systems get the order-to-cash check, with its profile of the stuck orders.
+ORDER_TO_CASH = re.compile(r"\bpaid\b|stuck|pending|unbilled|not billed|no invoice|without invoice|not dispatched|"
+                           r"not shipped|unshipped|order.to.cash|reconcil", re.I)
+
+
 def _diagnose_gather(c: Ctx) -> list:
     g = [("compare_day", dict(day=c.win.day))] if c.win.day else []
     return g + [("get_sales_summary", _w(c)), ("get_sales_summary", _prior(c)), ("website_funnel", _wpad(c)),
@@ -262,9 +267,10 @@ PLANS: dict[str, Plan] = {
     "pricing": Plan("conditional", ["discount_leakage", "category_performance", "top_skus", "get_sales_summary"],
                     gather=lambda c: [("discount_leakage", _w(c) if "diwali" not in c.q.lower()
                                        else dict(start=f"{c.as_of[:4]}-10-15", end=c.as_of))]),
-    "operations": Plan("concurrent", ["fulfilment_speed", "list_findings", "data_quality"],
+    "operations": Plan("concurrent", ["fulfilment_speed", "order_to_cash_gaps", "list_findings", "data_quality"],
                        gather=lambda c: [("fulfilment_speed", _wpad(c)), ("list_findings", _findings_in(c, 10)),
-                                         ("data_quality", {})]),
+                                         ("data_quality", {})]
+                       + ([("order_to_cash_gaps", {})] if ORDER_TO_CASH.search(c.q) else [])),
     "web": Plan("conditional", ["website_funnel", "get_sales_summary", "list_findings"], gather=lambda c: [("website_funnel", _w(c))]),
     "returns": Plan("conditional", ["return_reasons", "top_skus"], gather=lambda c: [("return_reasons", _w(c))]),
     "general": Plan("conditional", READ_TOOLS),
